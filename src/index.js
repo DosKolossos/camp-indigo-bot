@@ -1,4 +1,6 @@
-const { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder } = require('discord.js');
+const fs = require('fs');
+const path = require('path');
+const { Client, Collection, GatewayIntentBits, REST, Routes } = require('discord.js');
 require('dotenv').config();
 
 const token = process.env.DISCORD_TOKEN;
@@ -10,35 +12,64 @@ if (!token || !clientId || !guildId) {
 }
 
 const client = new Client({
-  intents: [GatewayIntentBits.Guilds]
+  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers]
 });
 
-const commands = [
-  new SlashCommandBuilder()
-    .setName('ping')
-    .setDescription('Testet, ob der Bot online ist.')
-    .toJSON()
-];
+client.commands = new Collection();
+
+const commandsPath = path.join(__dirname, 'commands');
+const commandFiles = fs.readdirSync(commandsPath).filter(file => file.endsWith('.js'));
+
+for (const file of commandFiles) {
+  const command = require(path.join(commandsPath, file));
+  client.commands.set(command.data.name, command);
+}
 
 async function registerCommands() {
   const rest = new REST({ version: '10' }).setToken(token);
-  await rest.put(
-    Routes.applicationGuildCommands(clientId, guildId),
-    { body: commands }
-  );
+  const payload = [...client.commands.values()].map(command => command.data.toJSON());
+
+  await rest.put(Routes.applicationGuildCommands(clientId, guildId), { body: payload });
   console.log('Slash-Commands registriert.');
 }
 
-client.once('ready', async () => {
-  console.log(`Eingeloggt als ${client.user.tag}`);
+client.once('clientReady', async readyClient => {
+  console.log(`Eingeloggt als ${readyClient.user.tag}`);
   await registerCommands();
 });
 
 client.on('interactionCreate', async interaction => {
-  if (!interaction.isChatInputCommand()) return;
+  try {
+    if (interaction.isChatInputCommand()) {
+      const command = client.commands.get(interaction.commandName);
+      if (!command) return;
+      await command.execute(interaction);
+      return;
+    }
 
-  if (interaction.commandName === 'ping') {
-    await interaction.reply('Pong! Camp Indigo lebt. 🏕️');
+    if (interaction.isButton() && interaction.customId.startsWith('camp:start:')) {
+      const startCommand = client.commands.get('setup-start');
+      if (!startCommand?.handleButton) return;
+      await startCommand.handleButton(interaction);
+      return;
+    }
+
+    if (interaction.isStringSelectMenu() && interaction.customId === 'camp:start:starter-select') {
+      const startCommand = client.commands.get('setup-start');
+      if (!startCommand?.handleStringSelect) return;
+      await startCommand.handleStringSelect(interaction);
+    }
+  } catch (error) {
+    console.error('Interaktionsfehler:', error);
+
+    if (interaction.isRepliable()) {
+      const payload = { content: 'Beim Ausführen der Aktion ist ein Fehler aufgetreten.', ephemeral: true };
+      if (interaction.deferred || interaction.replied) {
+        await interaction.followUp(payload).catch(() => null);
+      } else {
+        await interaction.reply(payload).catch(() => null);
+      }
+    }
   }
 });
 
