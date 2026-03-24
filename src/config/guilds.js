@@ -3,21 +3,24 @@ module.exports = [
     key: 'nimbus',
     name: 'Nimbus',
     emoji: '🔵',
+    description: 'Wissen, Ruhe und Planung.',
     color: 0x4f86f7,
-    description: 'Wissen, Ruhe und Planung. Nimbus liebt Forschung, Struktur und kluge Entwicklung.'
+    roleName: 'Nimbus'
   },
   {
     key: 'ember',
     name: 'Ember',
     emoji: '🔴',
-    color: 0xe74c3c,
-    description: 'Mut, Stärke und Ehrgeiz. Ember drückt vorwärts und scheut keine Herausforderung.'
+    description: 'Mut, Stärke und Ehrgeiz.',
+    color: 0xf25f5c,
+    roleName: 'Ember'
   },
   {
     key: 'volt',
     name: 'Volt',
     emoji: '🟡',
-    color: 0xf1c40f,
-    description: 'Instinkt, Tempo und Anpassung. Volt liebt Erkundung, Chancen und schnelle Entscheidungen.'
+    description: 'Instinkt, Tempo und Anpassung.',
+    color: 0xf7d154,
+    roleName: 'Volt'
   }
 ];
