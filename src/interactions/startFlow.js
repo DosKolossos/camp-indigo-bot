@@ -42,7 +42,7 @@ function buildStarterPayload(selectedKey) {
             `**Fähigkeit:** ${starter.ability}\n\n` +
             `${buildStatsText(starter.stats)}`
         )
-        .setImage(starter.imageUrl)
+        .setThumbnail(starter.imageUrl)
         .setColor(0x6c5ce7);
 
     const starterSelect = new StringSelectMenuBuilder()
