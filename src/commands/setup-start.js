@@ -8,6 +8,8 @@ const {
   EmbedBuilder
 } = require('discord.js');
 
+const { getState, setState } = require('../services/stateService');
+
 function buildStartMessage() {
   const embed = new EmbedBuilder()
     .setTitle('🏕️ Willkommen in Camp Indigo')
@@ -30,10 +32,31 @@ function buildStartMessage() {
   };
 }
 
+async function findExistingStartMessage(client) {
+  const savedChannelId = getState('start_panel_channel_id');
+  const savedMessageId = getState('start_panel_message_id');
+
+  if (!savedChannelId || !savedMessageId) {
+    return null;
+  }
+
+  const channel = await client.channels.fetch(savedChannelId).catch(() => null);
+  if (!channel || !channel.isTextBased()) {
+    return null;
+  }
+
+  const message = await channel.messages.fetch(savedMessageId).catch(() => null);
+  if (!message) {
+    return null;
+  }
+
+  return { channel, message };
+}
+
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('setup-start')
-    .setDescription('Postet die Startnachricht für Camp Indigo.')
+    .setDescription('Postet oder aktualisiert die Startnachricht für Camp Indigo.')
     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
 
   async execute(interaction) {
@@ -45,7 +68,7 @@ module.exports = {
     }
 
     const targetChannelId = process.env.START_CHANNEL_ID || interaction.channelId;
-    const targetChannel = await interaction.client.channels.fetch(targetChannelId);
+    const targetChannel = await interaction.client.channels.fetch(targetChannelId).catch(() => null);
 
     if (!targetChannel || !targetChannel.isTextBased()) {
       return interaction.reply({
@@ -54,10 +77,33 @@ module.exports = {
       });
     }
 
-    await targetChannel.send(buildStartMessage());
+    const payload = buildStartMessage();
+    const existing = await findExistingStartMessage(interaction.client);
+
+    let finalMessage;
+    let infoText;
+
+    if (existing) {
+      const sameChannel = existing.channel.id === targetChannel.id;
+
+      if (sameChannel) {
+        finalMessage = await existing.message.edit(payload);
+        infoText = `Startnachricht wurde in <#${targetChannel.id}> aktualisiert.`;
+      } else {
+        await existing.message.delete().catch(() => null);
+        finalMessage = await targetChannel.send(payload);
+        infoText = `Startnachricht wurde nach <#${targetChannel.id}> verschoben.`;
+      }
+    } else {
+      finalMessage = await targetChannel.send(payload);
+      infoText = `Startnachricht wurde in <#${targetChannel.id}> gepostet.`;
+    }
+
+    setState('start_panel_channel_id', targetChannel.id);
+    setState('start_panel_message_id', finalMessage.id);
 
     return interaction.reply({
-      content: `Startnachricht wurde in <#${targetChannel.id}> gepostet.`,
+      content: infoText,
       flags: MessageFlags.Ephemeral
     });
   }
