@@ -9,8 +9,10 @@ const {
 
 const starters = require('../config/starters');
 const guilds = require('../config/guilds');
-const { upsertPlayer } = require('../services/playerStore');
-
+const {
+  getPlayerByDiscordUserId,
+  createPlayer
+} = require('../services/playerService');
 function getStarter(key) {
     return starters.find(starter => starter.key === key) || starters[0];
 }
@@ -197,7 +199,7 @@ module.exports = {
                         console.warn(`Channel ist nicht textbasiert: ${chatChannelId}`);
                     } else {
                         await chatChannel.send(
-                            buildWelcomeMessage(interaction.user.id, starter, guild)
+                            buildWelcomeMessage(interaction.user.discordUserId, starter, guild)
                         );
                     }
                 }
