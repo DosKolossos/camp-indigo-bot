@@ -197,7 +197,7 @@ module.exports = {
                         console.warn(`Channel ist nicht textbasiert: ${chatChannelId}`);
                     } else {
                         await chatChannel.send(
-                            buildWelcomeMessage(interaction.user.username, starter, guild)
+                            buildWelcomeMessage(interaction.user.id, starter, guild)
                         );
                     }
                 }
