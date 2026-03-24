@@ -75,7 +75,6 @@ function startAdminServer() {
       discord_username: req.body.discord_username,
       pokemon_key: req.body.pokemon_key,
       guild_key: req.body.guild_key,
-      level: req.body.level,
       xp: req.body.xp,
       wood: req.body.wood,
       food: req.body.food,
@@ -324,9 +323,9 @@ function renderPlayerRow(player) {
         <strong>${escapeHtml(player.discord_username)}</strong><br />
         <span class="muted">${escapeHtml(player.discord_user_id)}</span>
       </td>
-      <td>${escapeHtml(player.pokemon_key)}</td>
-      <td>${escapeHtml(player.guild_key)}</td>
-      <td><strong>Lv ${player.level}</strong><br /><span class="muted">${player.xp} XP</span></td>
+      <td>${escapeHtml(getStarterLabel(player))}</td>
+      <td>${escapeHtml(getGuildLabel(player))}</td>
+      <td><strong>Lv ${player.level}</strong><br /><span class="muted">${escapeHtml(getProgressLabel(player))}</span></td>
       <td>🪵 ${player.wood} · 🍖 ${player.food} · 🪨 ${player.stone}</td>
       <td>${player.contribution}</td>
       <td>${sammeln}<br />${arbeiten}</td>
@@ -367,7 +366,7 @@ function renderPlayerEditor(player) {
     <div class="topbar">
       <div>
         <div class="title">Spielstand bearbeiten</div>
-        <div class="subtitle"><a href="/admin">← Zur Übersicht</a></div>
+        <div class="subtitle"><a href="/admin">← Zur Übersicht</a> · ${escapeHtml(getStarterLabel(player))} · ${escapeHtml(getGuildLabel(player))}</div>
       </div>
       <div class="pill">ID ${player.id}</div>
     </div>
@@ -393,11 +392,12 @@ function renderPlayerEditor(player) {
           </div>
           <div>
             <label>Level</label>
-            <input type="number" min="1" name="level" value="${player.level}" required />
+            <input type="text" value="${player.level}" disabled />
           </div>
           <div>
             <label>XP</label>
             <input type="number" min="0" name="xp" value="${player.xp}" required />
+            <div class="muted" style="margin-top:-6px; font-size:12px;">Level wird automatisch aus den XP berechnet. ${escapeHtml(getProgressLabel(player))}</div>
           </div>
           <div>
             <label>Holz</label>
@@ -462,6 +462,29 @@ function renderPlayerEditor(player) {
 
 function renderNoticeFromLocation() {
   return '';
+}
+
+function getStarterByKey(key) {
+  return starters.find(starter => starter.key === key) || null;
+}
+
+function getGuildByKey(key) {
+  return guilds.find(guild => guild.key === key) || null;
+}
+
+function getStarterLabel(player) {
+  const starter = getStarterByKey(player.pokemon_key);
+  return starter ? `${starter.name} ${starter.emoji}` : player.pokemon_key;
+}
+
+function getGuildLabel(player) {
+  const guild = getGuildByKey(player.guild_key);
+  return guild ? `${guild.name} ${guild.emoji}` : player.guild_key;
+}
+
+function getProgressLabel(player) {
+  const xpInLevel = Math.max(0, Number(player.xp || 0) - Math.max(0, (player.level - 1) * 20));
+  return `${xpInLevel}/20 XP bis Level ${player.level + 1}`;
 }
 
 function renderCooldownTag(value, label) {

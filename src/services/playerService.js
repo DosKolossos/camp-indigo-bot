@@ -6,24 +6,45 @@ const ACTION_COOLDOWN_FIELDS = {
   arbeiten: 'arbeiten_cooldown_until'
 };
 
+function calculateLevelFromXp(xp) {
+  return Math.max(1, Math.floor(Number(xp || 0) / XP_PER_LEVEL) + 1);
+}
+
+function normalizePlayerRecord(player) {
+  if (!player) return null;
+
+  const normalizedXp = Number.isFinite(Number(player.xp)) ? Math.max(0, Number(player.xp)) : 0;
+  const expectedLevel = calculateLevelFromXp(normalizedXp);
+
+  if (player.level !== expectedLevel && player.id) {
+    db.prepare(`UPDATE players SET level = ? WHERE id = ?`).run(expectedLevel, player.id);
+  }
+
+  return {
+    ...player,
+    xp: normalizedXp,
+    level: expectedLevel
+  };
+}
+
 function getPlayerByDiscordUserId(discordUserId) {
-  return db.prepare(`
+  const player = db.prepare(`
     SELECT *
     FROM players
     WHERE discord_user_id = ?
   `).get(discordUserId);
+
+  return normalizePlayerRecord(player);
 }
 
 function getPlayerById(id) {
-  return db.prepare(`
+  const player = db.prepare(`
     SELECT *
     FROM players
     WHERE id = ?
   `).get(id);
-}
 
-function calculateLevelFromXp(xp) {
-  return Math.max(1, Math.floor(xp / XP_PER_LEVEL) + 1);
+  return normalizePlayerRecord(player);
 }
 
 function createPlayer({ discordUserId, discordUsername, pokemonKey, guildKey, guildRoleId = null }) {
@@ -45,7 +66,7 @@ function createPlayer({ discordUserId, discordUsername, pokemonKey, guildKey, gu
 }
 
 function allPlayers() {
-  return db.prepare(`SELECT * FROM players ORDER BY created_at ASC`).all();
+  return db.prepare(`SELECT * FROM players ORDER BY created_at ASC`).all().map(normalizePlayerRecord);
 }
 
 function updatePlayerProgress(discordUserId, changes = {}) {
@@ -170,8 +191,8 @@ function updatePlayerAdmin(id, payload = {}) {
     ...payload
   };
 
-  nextPlayer.level = Number.isFinite(Number(nextPlayer.level)) ? Math.max(1, Number(nextPlayer.level)) : currentPlayer.level;
   nextPlayer.xp = Number.isFinite(Number(nextPlayer.xp)) ? Math.max(0, Number(nextPlayer.xp)) : currentPlayer.xp;
+  nextPlayer.level = calculateLevelFromXp(nextPlayer.xp);
   nextPlayer.wood = Number.isFinite(Number(nextPlayer.wood)) ? Math.max(0, Number(nextPlayer.wood)) : currentPlayer.wood;
   nextPlayer.food = Number.isFinite(Number(nextPlayer.food)) ? Math.max(0, Number(nextPlayer.food)) : currentPlayer.food;
   nextPlayer.stone = Number.isFinite(Number(nextPlayer.stone)) ? Math.max(0, Number(nextPlayer.stone)) : currentPlayer.stone;
