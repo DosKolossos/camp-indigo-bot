@@ -1,11 +1,9 @@
-const path = require('path');
 const {
     ActionRowBuilder,
     StringSelectMenuBuilder,
     ButtonBuilder,
     ButtonStyle,
     EmbedBuilder,
-    AttachmentBuilder,
     MessageFlags
 } = require('discord.js');
 
@@ -37,7 +35,6 @@ function buildStatsText(stats) {
 
 function buildStarterPayload(selectedKey) {
     const starter = getStarter(selectedKey);
-    const attachment = new AttachmentBuilder(starterImagePath(starter), { name: starter.imageUrl });
     const embed = new EmbedBuilder()
         .setTitle(`${starter.emoji} ${starter.name}`)
         .setDescription(
@@ -45,7 +42,7 @@ function buildStarterPayload(selectedKey) {
             `**Fähigkeit:** ${starter.ability}\n\n` +
             `${buildStatsText(starter.stats)}`
         )
-        .setImage(`attachment://${starter.imageUrl}`)
+        .setImage(starter.imageUrl)
         .setColor(0x6c5ce7);
 
     const starterSelect = new StringSelectMenuBuilder()
@@ -71,7 +68,6 @@ function buildStarterPayload(selectedKey) {
     return {
         embeds: [embed],
         components: [row1, row2],
-        files: [attachment],
         flags: MessageFlags.Ephemeral
     };
 }
@@ -79,7 +75,6 @@ function buildStarterPayload(selectedKey) {
 function buildGuildPayload(starterKey, guildKey) {
     const starter = getStarter(starterKey);
     const guild = getGuild(guildKey);
-    const attachment = new AttachmentBuilder(starterImagePath(starter), { name: starter.imageUrl });
 
     const embed = new EmbedBuilder()
         .setTitle(`🏳️ Gilde wählen – ${guild.emoji} ${guild.name}`)
@@ -114,7 +109,6 @@ function buildGuildPayload(starterKey, guildKey) {
     return {
         embeds: [embed],
         components: [row1, row2],
-        files: [attachment],
         flags: MessageFlags.Ephemeral
     };
 }

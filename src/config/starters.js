@@ -1,3 +1,4 @@
+const IMAGE_BASE_URL = process.env.IMAGE_BASE_URL;
 module.exports = [
   {
     key: 'bulbasaur',
@@ -6,7 +7,7 @@ module.exports = [
     style: 'Natur / Nahrung / Support',
     ability: 'Grüner Daumen – bessere Nahrungsausbeute und kleine Heilung nach Arbeit.',
     stats: { kraft: 2, tempo: 2, ausdauer: 3, instinkt: 3, geschick: 4 },
-    imageUrl: 'bulbasaur.png'
+    imageUrl: `${IMAGE_BASE_URL}/bulbasaur.png`
   },
   {
     key: 'charmander',
@@ -15,7 +16,7 @@ module.exports = [
     style: 'Schmiede / Tempo / Offensive',
     ability: 'Heißblütig – schneller bei Werkstatt- und Kampfarbeit.',
     stats: { kraft: 3, tempo: 4, ausdauer: 2, instinkt: 2, geschick: 3 },
-    imageUrl: 'charmander.png'
+    imageUrl: `${IMAGE_BASE_URL}/charmander.png`
   },
   {
     key: 'squirtle',
@@ -24,7 +25,7 @@ module.exports = [
     style: 'Bau / Verteidigung / Zuverlässigkeit',
     ability: 'Standhaft – bessere Beiträge beim Ausbau und Schutz des Lagers.',
     stats: { kraft: 3, tempo: 2, ausdauer: 5, instinkt: 2, geschick: 3 },
-    imageUrl: 'squirtle.png'
+    imageUrl: `${IMAGE_BASE_URL}/squirtle.png`
   },
   {
     key: 'pikachu',
@@ -33,7 +34,7 @@ module.exports = [
     style: 'Energie / Technik / Geschwindigkeit',
     ability: 'Stromstoß – kürzere Abklingzeiten bei vielen Aktionen.',
     stats: { kraft: 2, tempo: 5, ausdauer: 2, instinkt: 3, geschick: 4 },
-    imageUrl: 'pikachu.png'
+    imageUrl: `${IMAGE_BASE_URL}/pikachu.png`
   },
   {
     key: 'eevee',
@@ -42,7 +43,7 @@ module.exports = [
     style: 'Allround / Anpassung / Zukunft',
     ability: 'Anpassungsfähig – kleiner Bonus auf fast alle Standardaktionen.',
     stats: { kraft: 3, tempo: 3, ausdauer: 3, instinkt: 3, geschick: 3 },
-    imageUrl: 'eevee.png'
+    imageUrl: `${IMAGE_BASE_URL}/eevee.png`
   },
   {
     key: 'abra',
@@ -51,7 +52,7 @@ module.exports = [
     style: 'Forschung / Effizienz / seltene Funde',
     ability: 'Mentale Klarheit – höhere Chance auf besondere Entdeckungen.',
     stats: { kraft: 1, tempo: 3, ausdauer: 2, instinkt: 4, geschick: 5 },
-    imageUrl: 'abra.png'
+    imageUrl: `${IMAGE_BASE_URL}/abra.png`
   },
   {
     key: 'gastly',
@@ -60,7 +61,7 @@ module.exports = [
     style: 'Nacht / Ruinen / Mystik',
     ability: 'Zwielichtjäger – stärker bei Nacht und seltenen Ereignissen.',
     stats: { kraft: 2, tempo: 4, ausdauer: 2, instinkt: 5, geschick: 3 },
-    imageUrl: 'gastly.png'
+    imageUrl: `${IMAGE_BASE_URL}/gastly.png`
   },
   {
     key: 'dratini',
@@ -69,7 +70,7 @@ module.exports = [
     style: 'Lategame / Wachstum / Potenzial',
     ability: 'Verborgene Kraft – langsam am Anfang, stark im späteren Verlauf.',
     stats: { kraft: 2, tempo: 2, ausdauer: 4, instinkt: 3, geschick: 4 },
-    imageUrl: 'dratini.png'
+    imageUrl: `${IMAGE_BASE_URL}/dratini.png`
   },
   {
     key: 'lucario',
@@ -78,7 +79,7 @@ module.exports = [
     style: 'Elite / Kampf / Aura',
     ability: 'Aurafokus – besonders stark bei Kampf, Wache und Spezialaufgaben.',
     stats: { kraft: 4, tempo: 4, ausdauer: 3, instinkt: 4, geschick: 3 },
-    imageUrl: 'lucario.png'
+    imageUrl: `${IMAGE_BASE_URL}/lucario.png`
   },
   {
     key: 'tinkaton',
@@ -87,7 +88,7 @@ module.exports = [
     style: 'Werkbank / Schmiede / Material',
     ability: 'Meisterhammer – effizient bei Bau, Werkstatt und Materialverarbeitung.',
     stats: { kraft: 4, tempo: 2, ausdauer: 3, instinkt: 2, geschick: 4 },
-    imageUrl: 'tinkaton.png'
+    imageUrl: `${IMAGE_BASE_URL}/tinkaton.png`
   },
   {
     key: 'treecko',
@@ -96,7 +97,7 @@ module.exports = [
     style: 'Erkundung / Wald / Tempo',
     ability: 'Waldläufer – schneller beim Scouting und Sammeln im Grünen.',
     stats: { kraft: 2, tempo: 5, ausdauer: 2, instinkt: 4, geschick: 3 },
-    imageUrl: 'treecko.png'
+    imageUrl: `${IMAGE_BASE_URL}/treecko.png`
   },
   {
     key: 'mareep',
@@ -105,7 +106,7 @@ module.exports = [
     style: 'Energie / Infrastruktur / Technik',
     ability: 'Flauschige Leitung – Boni auf Technik, Energie und spätere Infrastruktur.',
     stats: { kraft: 2, tempo: 2, ausdauer: 4, instinkt: 3, geschick: 4 },
-    imageUrl: 'mareep.png'
+    imageUrl: `${IMAGE_BASE_URL}/mareep.png`
   },
   {
     key: 'rowlet',
@@ -114,7 +115,7 @@ module.exports = [
     style: 'Wald / Ruhe / Präzision',
     ability: 'Schattenfeder – stark beim Erkunden, Jagen und vorsichtigen Sammeln.',
     stats: { kraft: 2, tempo: 3, ausdauer: 3, instinkt: 4, geschick: 4 },
-    imageUrl: 'rowlet.png'
+    imageUrl: `${IMAGE_BASE_URL}/rowlet.png`
   },
   {
     key: 'totodile',
@@ -123,7 +124,7 @@ module.exports = [
     style: 'Wasser / Wildheit / Ausdauer',
     ability: 'Bissiger Eifer – stark bei robusten Einsätzen und Wasserprojekten.',
     stats: { kraft: 4, tempo: 3, ausdauer: 4, instinkt: 2, geschick: 2 },
-    imageUrl: 'totodile.png'
+    imageUrl: `${IMAGE_BASE_URL}/totodile.png`
   },
   {
     key: 'fuecoco',
@@ -132,6 +133,6 @@ module.exports = [
     style: 'Feuer / Gemüt / Durchhaltevermögen',
     ability: 'Warmer Magen – gut bei Versorgung, Feuerstellen und langen Arbeiten.',
     stats: { kraft: 3, tempo: 2, ausdauer: 5, instinkt: 2, geschick: 2 },
-    imageUrl: 'fuecoco.png'
+    imageUrl: `${IMAGE_BASE_URL}/fuecoco.png`
   }
 ];
