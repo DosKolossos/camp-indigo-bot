@@ -115,9 +115,9 @@ function buildGuildPayload(starterKey, guildKey) {
 
 function buildWelcomeMessage(username, starter, guild) {
     const variants = [
-        `🎉 **${username}** ist dem Lager beigetreten!\nPartner-Pokémon: **${starter.name}**\nGilde: **${guild.name}** ${guild.emoji}`,
-        `🏕️ Ein neues Pokémon ist angekommen!\n**${username}** startet als **${starter.name}** bei **${guild.name}** ${guild.emoji}.`,
-        `✨ Das Lager wächst weiter: **${username}** hat sich **${guild.name}** angeschlossen.\nGewähltes Pokémon: **${starter.name}**`
+        `🎉 **@${username}** ist dem Lager beigetreten!\nPartner-Pokémon: **${starter.name}**\nGilde: **@${guild.name}** ${guild.emoji}`,
+        `🏕️ Ein neues Pokémon ist angekommen!\n**@${username}** startet als **${starter.name}** bei **@${guild.name}** ${guild.emoji}.`,
+        `✨ Das Lager wächst weiter: **@${username}** hat sich **@${guild.name}** angeschlossen.\nGewähltes Pokémon: **${starter.name}**`
     ];
     return variants[Math.floor(Math.random() * variants.length)];
 }
@@ -181,11 +181,25 @@ module.exports = {
 
                 await assignGuildRole(interaction, guild);
 
-                const chatChannelId = process.env.CHAT_CHANNEL_ID || interaction.channelId;
-                const chatChannel = await interaction.client.channels.fetch(chatChannelId).catch(() => null);
+                const chatChannelId = process.env.CHAT_CHANNEL_ID;
 
-                if (chatChannel && chatChannel.isTextBased()) {
-                    await chatChannel.send(buildWelcomeMessage(interaction.user.username, starter, guild));
+                if (!chatChannelId) {
+                    console.warn('CHAT_CHANNEL_ID ist nicht gesetzt.');
+                } else {
+                    const chatChannel = await interaction.client.channels.fetch(chatChannelId).catch(error => {
+                        console.error('CHAT_CHANNEL_ID konnte nicht geladen werden:', chatChannelId, error);
+                        return null;
+                    });
+
+                    if (!chatChannel) {
+                        console.warn(`Chat-Channel nicht gefunden: ${chatChannelId}`);
+                    } else if (!chatChannel.isTextBased()) {
+                        console.warn(`Channel ist nicht textbasiert: ${chatChannelId}`);
+                    } else {
+                        await chatChannel.send(
+                            buildWelcomeMessage(interaction.user.username, starter, guild)
+                        );
+                    }
                 }
 
                 return interaction.update({
@@ -193,7 +207,9 @@ module.exports = {
                         `✅ Willkommen in **Camp Indigo**!\n` +
                         `Dein Pokémon: **${starter.name}**\n` +
                         `Deine Gilde: **${guild.name}** ${guild.emoji}`,
+
                     embeds: [],
+
                     components: [],
                     files: []
                 });

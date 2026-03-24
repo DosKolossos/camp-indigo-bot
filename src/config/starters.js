@@ -1,4 +1,3 @@
-const IMAGE_BASE_URL = process.env.IMAGE_BASE_URL;
 module.exports = [
   {
     key: 'bulbasaur',
