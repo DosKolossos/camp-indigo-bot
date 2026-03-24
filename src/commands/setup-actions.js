@@ -8,7 +8,6 @@ const {
   EmbedBuilder
 } = require('discord.js');
 
-const { ensureAdmin } = require('../utils/admin');
 const { getState, setState } = require('../services/stateService');
 
 function buildActionsMessage() {
@@ -16,7 +15,7 @@ function buildActionsMessage() {
     .setTitle('⚔️ Camp-Aktionen')
     .setDescription(
       'Öffne dein Aktionsmenü und wähle, was dein Pokémon als Nächstes tun soll.\n\n' +
-      'Dort findest du zuerst **Profil**, **Sammeln**, **Arbeiten** und den **Lagerstatus**.'
+      'Dort findest du zuerst **Profil, Sammeln, Arbeiten** und den **Lagerstatus**.'
     )
     .setColor(0x3498db);
 
@@ -33,6 +32,27 @@ function buildActionsMessage() {
   };
 }
 
+async function findExistingActionsMessage(client) {
+  const savedChannelId = getState('actions_panel_channel_id');
+  const savedMessageId = getState('actions_panel_message_id');
+
+  if (!savedChannelId || !savedMessageId) {
+    return null;
+  }
+
+  const channel = await client.channels.fetch(savedChannelId).catch(() => null);
+  if (!channel || !channel.isTextBased()) {
+    return null;
+  }
+
+  const message = await channel.messages.fetch(savedMessageId).catch(() => null);
+  if (!message) {
+    return null;
+  }
+
+  return { channel, message };
+}
+
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('setup-actions')
@@ -40,39 +60,54 @@ module.exports = {
     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
 
   async execute(interaction) {
-    if (!(await ensureAdmin(interaction))) return;
+    if (!interaction.memberPermissions?.has(PermissionFlagsBits.Administrator)) {
+      return interaction.reply({
+        content: 'Dafür brauchst du Admin-Rechte.',
+        flags: MessageFlags.Ephemeral
+      });
+    }
 
-    const channelId = process.env.ACTION_CHANNEL_ID || process.env.CHAT_CHANNEL_ID || interaction.channelId;
-    const channel = await interaction.client.channels.fetch(channelId).catch(() => null);
+    const targetChannelId =
+      process.env.ACTION_CHANNEL_ID ||
+      process.env.CHAT_CHANNEL_ID ||
+      interaction.channelId;
 
-    if (!channel || !channel.isTextBased()) {
+    const targetChannel = await interaction.client.channels.fetch(targetChannelId).catch(() => null);
+
+    if (!targetChannel || !targetChannel.isTextBased()) {
       return interaction.reply({
         content: 'Der Aktionskanal konnte nicht gefunden werden.',
         flags: MessageFlags.Ephemeral
       });
     }
 
-    const existingMessageId = getState('actions_panel_message_id');
     const payload = buildActionsMessage();
+    const existing = await findExistingActionsMessage(interaction.client);
 
-    let message = null;
+    let finalMessage;
+    let infoText;
 
-    if (existingMessageId) {
-      message = await channel.messages.fetch(existingMessageId).catch(() => null);
-      if (message) {
-        await message.edit(payload);
+    if (existing) {
+      const sameChannel = existing.channel.id === targetChannel.id;
+
+      if (sameChannel) {
+        finalMessage = await existing.message.edit(payload);
+        infoText = `Aktionsnachricht wurde in <#${targetChannel.id}> aktualisiert.`;
+      } else {
+        await existing.message.delete().catch(() => null);
+        finalMessage = await targetChannel.send(payload);
+        infoText = `Aktionsnachricht wurde nach <#${targetChannel.id}> verschoben.`;
       }
+    } else {
+      finalMessage = await targetChannel.send(payload);
+      infoText = `Aktionsnachricht wurde in <#${targetChannel.id}> gepostet.`;
     }
 
-    if (!message) {
-      message = await channel.send(payload);
-    }
-
-    setState('actions_panel_channel_id', channel.id);
-    setState('actions_panel_message_id', message.id);
+    setState('actions_panel_channel_id', targetChannel.id);
+    setState('actions_panel_message_id', finalMessage.id);
 
     return interaction.reply({
-      content: `Aktionsnachricht ist bereit in <#${channel.id}>.`,
+      content: infoText,
       flags: MessageFlags.Ephemeral
     });
   }
