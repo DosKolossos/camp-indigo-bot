@@ -1,6 +1,10 @@
 const db = require('../db/database');
 
 const XP_PER_LEVEL = 20;
+const ACTION_COOLDOWN_FIELDS = {
+  sammeln: 'sammeln_cooldown_until',
+  arbeiten: 'arbeiten_cooldown_until'
+};
 
 function getPlayerByDiscordUserId(discordUserId) {
   return db.prepare(`
@@ -83,6 +87,10 @@ function updatePlayerProgress(discordUserId, changes = {}) {
     WHERE discord_user_id = ?
   `).run(...values);
 
+  return refreshPlayerLevel(discordUserId);
+}
+
+function refreshPlayerLevel(discordUserId) {
   const player = getPlayerByDiscordUserId(discordUserId);
   if (!player) return null;
 
@@ -113,12 +121,128 @@ function getCampTotals() {
   `).get();
 }
 
+function getCooldownField(actionKey) {
+  return ACTION_COOLDOWN_FIELDS[actionKey] || null;
+}
+
+function setActionCooldown(discordUserId, actionKey, untilIso) {
+  const field = getCooldownField(actionKey);
+  if (!field) {
+    throw new Error(`Unbekannte Action für Cooldown: ${actionKey}`);
+  }
+
+  db.prepare(`
+    UPDATE players
+    SET ${field} = ?, updated_at = ?
+    WHERE discord_user_id = ?
+  `).run(untilIso, new Date().toISOString(), discordUserId);
+
+  return getPlayerByDiscordUserId(discordUserId);
+}
+
+function resetPlayerCooldowns(discordUserId) {
+  db.prepare(`
+    UPDATE players
+    SET sammeln_cooldown_until = NULL,
+        arbeiten_cooldown_until = NULL,
+        updated_at = ?
+    WHERE discord_user_id = ?
+  `).run(new Date().toISOString(), discordUserId);
+
+  return getPlayerByDiscordUserId(discordUserId);
+}
+
+function resetAllCooldowns() {
+  db.prepare(`
+    UPDATE players
+    SET sammeln_cooldown_until = NULL,
+        arbeiten_cooldown_until = NULL,
+        updated_at = ?
+  `).run(new Date().toISOString());
+}
+
+function updatePlayerAdmin(id, payload = {}) {
+  const currentPlayer = getPlayerById(id);
+  if (!currentPlayer) return null;
+
+  const nextPlayer = {
+    ...currentPlayer,
+    ...payload
+  };
+
+  nextPlayer.level = Number.isFinite(Number(nextPlayer.level)) ? Math.max(1, Number(nextPlayer.level)) : currentPlayer.level;
+  nextPlayer.xp = Number.isFinite(Number(nextPlayer.xp)) ? Math.max(0, Number(nextPlayer.xp)) : currentPlayer.xp;
+  nextPlayer.wood = Number.isFinite(Number(nextPlayer.wood)) ? Math.max(0, Number(nextPlayer.wood)) : currentPlayer.wood;
+  nextPlayer.food = Number.isFinite(Number(nextPlayer.food)) ? Math.max(0, Number(nextPlayer.food)) : currentPlayer.food;
+  nextPlayer.stone = Number.isFinite(Number(nextPlayer.stone)) ? Math.max(0, Number(nextPlayer.stone)) : currentPlayer.stone;
+  nextPlayer.contribution = Number.isFinite(Number(nextPlayer.contribution)) ? Math.max(0, Number(nextPlayer.contribution)) : currentPlayer.contribution;
+
+  const now = new Date().toISOString();
+
+  db.prepare(`
+    UPDATE players
+    SET discord_username = ?,
+        pokemon_key = ?,
+        guild_key = ?,
+        level = ?,
+        xp = ?,
+        wood = ?,
+        food = ?,
+        stone = ?,
+        contribution = ?,
+        sammeln_cooldown_until = ?,
+        arbeiten_cooldown_until = ?,
+        updated_at = ?
+    WHERE id = ?
+  `).run(
+    String(nextPlayer.discord_username || currentPlayer.discord_username),
+    String(nextPlayer.pokemon_key || currentPlayer.pokemon_key),
+    String(nextPlayer.guild_key || currentPlayer.guild_key),
+    nextPlayer.level,
+    nextPlayer.xp,
+    nextPlayer.wood,
+    nextPlayer.food,
+    nextPlayer.stone,
+    nextPlayer.contribution,
+    normalizeNullableDate(nextPlayer.sammeln_cooldown_until),
+    normalizeNullableDate(nextPlayer.arbeiten_cooldown_until),
+    now,
+    id
+  );
+
+  return getPlayerById(id);
+}
+
+function normalizeNullableDate(value) {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toISOString();
+}
+
+function deletePlayerById(id) {
+  return db.prepare(`DELETE FROM players WHERE id = ?`).run(id);
+}
+
+function deleteAllPlayers() {
+  return db.prepare(`DELETE FROM players`).run();
+}
+
 module.exports = {
   XP_PER_LEVEL,
+  ACTION_COOLDOWN_FIELDS,
   calculateLevelFromXp,
   getPlayerByDiscordUserId,
+  getPlayerById,
   createPlayer,
   allPlayers,
   updatePlayerProgress,
-  getCampTotals
+  refreshPlayerLevel,
+  getCampTotals,
+  setActionCooldown,
+  resetPlayerCooldowns,
+  resetAllCooldowns,
+  updatePlayerAdmin,
+  deletePlayerById,
+  deleteAllPlayers
 };

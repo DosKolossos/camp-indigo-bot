@@ -14,6 +14,7 @@ const setupStartCommand = require('./commands/setup-start');
 const setupActionsCommand = require('./commands/setup-actions');
 const startFlow = require('./interactions/startFlow');
 const actionFlow = require('./interactions/actionFlow');
+const { startAdminServer } = require('./web/adminServer');
 
 const client = new Client({
   intents: [
@@ -89,5 +90,7 @@ client.on('interactionCreate', async interaction => {
     }
   }
 });
+
+startAdminServer();
 
 client.login(process.env.DISCORD_TOKEN);

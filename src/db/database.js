@@ -6,6 +6,15 @@ const db = new Database(dbPath);
 db.pragma('journal_mode = WAL');
 db.pragma('foreign_keys = ON');
 
+function ensureColumn(tableName, columnName, definition) {
+  const columns = db.prepare(`PRAGMA table_info(${tableName})`).all();
+  const exists = columns.some(column => column.name === columnName);
+
+  if (!exists) {
+    db.exec(`ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${definition}`);
+  }
+}
+
 db.exec(`
   CREATE TABLE IF NOT EXISTS players (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -20,6 +29,8 @@ db.exec(`
     stone INTEGER NOT NULL DEFAULT 0,
     contribution INTEGER NOT NULL DEFAULT 0,
     guild_role_id TEXT,
+    sammeln_cooldown_until TEXT,
+    arbeiten_cooldown_until TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
   );
@@ -30,5 +41,8 @@ db.exec(`
     updated_at TEXT NOT NULL
   );
 `);
+
+ensureColumn('players', 'sammeln_cooldown_until', 'TEXT');
+ensureColumn('players', 'arbeiten_cooldown_until', 'TEXT');
 
 module.exports = db;

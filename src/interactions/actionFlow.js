@@ -13,8 +13,20 @@ const {
   XP_PER_LEVEL,
   getPlayerByDiscordUserId,
   updatePlayerProgress,
-  getCampTotals
+  getCampTotals,
+  setActionCooldown
 } = require('../services/playerService');
+
+const SAMMELN_COOLDOWN_MS = parseDurationMs(process.env.SAMMELN_COOLDOWN_MINUTES, 10 * 60 * 1000, 60 * 1000);
+const ARBEITEN_COOLDOWN_MS = parseDurationMs(process.env.ARBEITEN_COOLDOWN_MINUTES, 8 * 60 * 1000, 60 * 1000);
+
+function parseDurationMs(envValue, fallback, multiplier = 1) {
+  const numericValue = Number(envValue);
+  if (!Number.isFinite(numericValue) || numericValue < 0) {
+    return fallback;
+  }
+  return numericValue * multiplier;
+}
 
 function getStarter(key) {
   return starters.find(item => item.key === key) || null;
@@ -39,17 +51,64 @@ function buildBackRow() {
   );
 }
 
+function getCooldownRemainingMs(player, fieldName) {
+  const value = player?.[fieldName];
+  if (!value) return 0;
+
+  const targetTime = new Date(value).getTime();
+  if (Number.isNaN(targetTime)) return 0;
+
+  return Math.max(0, targetTime - Date.now());
+}
+
+function formatRemaining(ms) {
+  const totalSeconds = Math.ceil(ms / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+
+  if (minutes <= 0) {
+    return `${seconds}s`;
+  }
+
+  return `${minutes}m ${seconds}s`;
+}
+
+function getActionStatus(player) {
+  const sammelnRemaining = getCooldownRemainingMs(player, 'sammeln_cooldown_until');
+  const arbeitenRemaining = getCooldownRemainingMs(player, 'arbeiten_cooldown_until');
+
+  return {
+    sammelnRemaining,
+    arbeitenRemaining,
+    sammelnLabel: sammelnRemaining > 0 ? `⏳ Sammeln in ${formatRemaining(sammelnRemaining)}` : '✅ Sammeln ist bereit',
+    arbeitenLabel: arbeitenRemaining > 0 ? `⏳ Arbeiten in ${formatRemaining(arbeitenRemaining)}` : '✅ Arbeiten ist bereit'
+  };
+}
+
 function buildActionMenu(player) {
   const starter = getStarter(player.pokemon_key);
   const guild = getGuild(player.guild_key);
+  const cooldowns = getActionStatus(player);
 
   const embed = new EmbedBuilder()
     .setTitle('🎮 Deine Aktionen')
     .setDescription(
-      `**Pokémon:** ${starter?.name ?? player.pokemon_key} ${starter?.emoji ?? ''}\n` +
-      `**Gilde:** ${guild?.name ?? player.guild_key} ${guild?.emoji ?? ''}\n` +
-      `**Level:** ${player.level}\n` +
-      `**Fortschritt:** ${getXpProgressText(player)}\n\n` +
+      `**Pokémon:** ${starter?.name ?? player.pokemon_key} ${starter?.emoji ?? ''}
+` +
+      `**Gilde:** ${guild?.name ?? player.guild_key} ${guild?.emoji ?? ''}
+` +
+      `**Level:** ${player.level}
+` +
+      `**Fortschritt:** ${getXpProgressText(player)}
+
+` +
+      `**Status**
+` +
+      `${cooldowns.sammelnLabel}
+` +
+      `${cooldowns.arbeitenLabel}
+
+` +
       'Wähle deine nächste Aktion.'
     )
     .setColor(guild?.color ?? 0x5865f2);
@@ -66,13 +125,17 @@ function buildActionMenu(player) {
       },
       {
         label: 'Sammeln',
-        description: 'Sammle Holz, Nahrung, Stein und XP',
+        description: cooldowns.sammelnRemaining > 0
+          ? `Wieder bereit in ${formatRemaining(cooldowns.sammelnRemaining)}`
+          : 'Sammle Holz, Nahrung, Stein und XP',
         value: 'sammeln',
         emoji: '🌿'
       },
       {
         label: 'Arbeiten',
-        description: 'Hilf dem Lager beim Ausbau',
+        description: cooldowns.arbeitenRemaining > 0
+          ? `Wieder bereit in ${formatRemaining(cooldowns.arbeitenRemaining)}`
+          : 'Hilf dem Lager beim Ausbau',
         value: 'arbeiten',
         emoji: '🔨'
       },
@@ -94,19 +157,37 @@ function buildActionMenu(player) {
 function buildProfilePayload(player) {
   const starter = getStarter(player.pokemon_key);
   const guild = getGuild(player.guild_key);
+  const cooldowns = getActionStatus(player);
 
   const embed = new EmbedBuilder()
     .setTitle(`📜 Profil von ${player.discord_username}`)
     .setDescription(
-      `**Pokémon:** ${starter?.name ?? player.pokemon_key} ${starter?.emoji ?? ''}\n` +
-      `**Gilde:** ${guild?.name ?? player.guild_key} ${guild?.emoji ?? ''}\n\n` +
-      `**Level:** ${player.level}\n` +
-      `**XP gesamt:** ${player.xp}\n` +
-      `**Fortschritt:** ${getXpProgressText(player)}\n\n` +
-      `**🪵 Holz:** ${player.wood}\n` +
-      `**🍖 Nahrung:** ${player.food}\n` +
-      `**🪨 Stein:** ${player.stone}\n` +
-      `**🏗️ Lagerbeitrag:** ${player.contribution}`
+      `**Pokémon:** ${starter?.name ?? player.pokemon_key} ${starter?.emoji ?? ''}
+` +
+      `**Gilde:** ${guild?.name ?? player.guild_key} ${guild?.emoji ?? ''}
+
+` +
+      `**Level:** ${player.level}
+` +
+      `**XP gesamt:** ${player.xp}
+` +
+      `**Fortschritt:** ${getXpProgressText(player)}
+
+` +
+      `**🪵 Holz:** ${player.wood}
+` +
+      `**🍖 Nahrung:** ${player.food}
+` +
+      `**🪨 Stein:** ${player.stone}
+` +
+      `**🏗️ Lagerbeitrag:** ${player.contribution}
+
+` +
+      `**Cooldowns**
+` +
+      `${cooldowns.sammelnLabel}
+` +
+      `${cooldowns.arbeitenLabel}`
     )
     .setColor(guild?.color ?? 0x2ecc71);
 
@@ -134,30 +215,63 @@ function buildActionResultPayload({ title, description, color = 0x2ecc71 }) {
   };
 }
 
+function buildCooldownPayload(actionLabel, remainingMs) {
+  return buildActionResultPayload({
+    title: '⏳ Aktion noch nicht bereit',
+    description: `**${actionLabel}** ist noch auf Cooldown.
+
+Bitte warte noch **${formatRemaining(remainingMs)}**.`,
+    color: 0xe74c3c
+  });
+}
+
 function runSammeln(player) {
+  const remainingMs = getCooldownRemainingMs(player, 'sammeln_cooldown_until');
+  if (remainingMs > 0) {
+    return buildCooldownPayload('Sammeln', remainingMs);
+  }
+
   const wood = randomInt(1, 3);
   const food = randomInt(1, 2);
   const stone = randomInt(0, 2);
   const xp = randomInt(4, 6);
 
   const updatedPlayer = updatePlayerProgress(player.discord_user_id, { wood, food, stone, xp });
+  const cooldownUntil = new Date(Date.now() + SAMMELN_COOLDOWN_MS).toISOString();
+  setActionCooldown(player.discord_user_id, 'sammeln', cooldownUntil);
+
   const levelUpText = updatedPlayer && updatedPlayer.level > player.level
-    ? `\n\n🎉 **Levelaufstieg!** Du bist jetzt Level **${updatedPlayer.level}**.`
+    ? `
+
+🎉 **Levelaufstieg!** Du bist jetzt Level **${updatedPlayer.level}**.`
     : '';
 
   return buildActionResultPayload({
     title: '🌿 Sammeln abgeschlossen',
     description:
-      `Du warst für das Lager unterwegs.\n\n` +
-      `+${wood} Holz\n` +
-      `+${food} Nahrung\n` +
-      `+${stone} Stein\n` +
-      `+${xp} XP${levelUpText}`,
+      `Du warst für das Lager unterwegs.
+
+` +
+      `+${wood} Holz
+` +
+      `+${food} Nahrung
+` +
+      `+${stone} Stein
+` +
+      `+${xp} XP
+
+` +
+      `Nächste Sammelaktion in **${formatRemaining(SAMMELN_COOLDOWN_MS)}**.${levelUpText}`,
     color: 0x27ae60
   });
 }
 
 function runArbeiten(player) {
+  const remainingMs = getCooldownRemainingMs(player, 'arbeiten_cooldown_until');
+  if (remainingMs > 0) {
+    return buildCooldownPayload('Arbeiten', remainingMs);
+  }
+
   const contribution = randomInt(2, 5);
   const wood = randomInt(0, 1);
   const stone = randomInt(0, 1);
@@ -170,18 +284,31 @@ function runArbeiten(player) {
     xp
   });
 
+  const cooldownUntil = new Date(Date.now() + ARBEITEN_COOLDOWN_MS).toISOString();
+  setActionCooldown(player.discord_user_id, 'arbeiten', cooldownUntil);
+
   const levelUpText = updatedPlayer && updatedPlayer.level > player.level
-    ? `\n\n🎉 **Levelaufstieg!** Du bist jetzt Level **${updatedPlayer.level}**.`
+    ? `
+
+🎉 **Levelaufstieg!** Du bist jetzt Level **${updatedPlayer.level}**.`
     : '';
 
   return buildActionResultPayload({
     title: '🔨 Arbeit im Lager erledigt',
     description:
-      `Du hast beim Ausbau des Camps geholfen.\n\n` +
-      `+${contribution} Lagerbeitrag\n` +
-      `+${wood} Holz\n` +
-      `+${stone} Stein\n` +
-      `+${xp} XP${levelUpText}`,
+      `Du hast beim Ausbau des Camps geholfen.
+
+` +
+      `+${contribution} Lagerbeitrag
+` +
+      `+${wood} Holz
+` +
+      `+${stone} Stein
+` +
+      `+${xp} XP
+
+` +
+      `Nächste Arbeitsaktion in **${formatRemaining(ARBEITEN_COOLDOWN_MS)}**.${levelUpText}`,
     color: 0xe67e22
   });
 }
@@ -194,11 +321,17 @@ function buildLagerPayload() {
       new EmbedBuilder()
         .setTitle('🏕️ Lagerstatus')
         .setDescription(
-          `**Abenteurer:** ${totals.players}\n` +
-          `**Gesamt-XP:** ${totals.xp}\n\n` +
-          `**🪵 Holz:** ${totals.wood}\n` +
-          `**🍖 Nahrung:** ${totals.food}\n` +
-          `**🪨 Stein:** ${totals.stone}\n` +
+          `**Abenteurer:** ${totals.players}
+` +
+          `**Gesamt-XP:** ${totals.xp}
+
+` +
+          `**🪵 Holz:** ${totals.wood}
+` +
+          `**🍖 Nahrung:** ${totals.food}
+` +
+          `**🪨 Stein:** ${totals.stone}
+` +
           `**🏗️ Gesamtbeitrag:** ${totals.contribution}`
         )
         .setColor(0xf1c40f)
