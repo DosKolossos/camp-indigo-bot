@@ -11,20 +11,29 @@ const {
 
 const pingCommand = require('./commands/ping');
 const setupStartCommand = require('./commands/setup-start');
+const setupActionsCommand = require('./commands/setup-actions');
 const startFlow = require('./interactions/startFlow');
+const actionFlow = require('./interactions/actionFlow');
 
 const client = new Client({
-  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers]
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMembers,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.MessageContent
+  ]
 });
 
 client.commands = new Collection();
 client.commands.set(pingCommand.data.name, pingCommand);
 client.commands.set(setupStartCommand.data.name, setupStartCommand);
+client.commands.set(setupActionsCommand.data.name, setupActionsCommand);
 
 async function registerCommands() {
   const commands = [
     pingCommand.data.toJSON(),
-    setupStartCommand.data.toJSON()
+    setupStartCommand.data.toJSON(),
+    setupActionsCommand.data.toJSON()
   ];
 
   const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
@@ -56,7 +65,13 @@ client.on('interactionCreate', async interaction => {
 
     if (interaction.isButton() || interaction.isStringSelectMenu()) {
       if (startFlow.canHandleInteraction(interaction)) {
-        await startFlow.handleInteraction(interaction);
+        const handled = await startFlow.handleInteraction(interaction);
+        if (handled !== false) return;
+      }
+
+      if (actionFlow.canHandleInteraction(interaction)) {
+        const handled = await actionFlow.handleInteraction(interaction);
+        if (handled !== false) return;
       }
     }
   } catch (error) {
