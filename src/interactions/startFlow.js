@@ -149,9 +149,9 @@ function buildGuildPayload(starterKey, guildKey) {
 
 function buildWelcomeMessage(username, starter, guild) {
   const variants = [
-    `🎉 **${username}** ist dem Lager beigetreten!\nPartner-Pokémon: **${starter.name}**\nGilde: **${guild.name}** ${guild.emoji}`,
-    `🏕️ Ein neues Pokémon ist angekommen!\n**${username}** startet als **${starter.name}** bei **${guild.name}** ${guild.emoji}.`,
-    `✨ Das Lager wächst weiter: **${username}** hat sich **${guild.name}** angeschlossen.\nGewähltes Pokémon: **${starter.name}**`
+    `🎉 **@${username}** ist dem Lager beigetreten!\nPartner-Pokémon: **${starter.name}**\nGilde: **${guild.name}** ${guild.emoji}`,
+    `🏕️ Ein neues Pokémon ist angekommen!\n**@${username}** startet als **${starter.name}** bei **${guild.name}** ${guild.emoji}.`,
+    `✨ Das Lager wächst weiter: **@${username}** hat sich **${guild.name}** angeschlossen.\nGewähltes Pokémon: **${starter.name}**`
   ];
   return variants[Math.floor(Math.random() * variants.length)];
 }

@@ -23,6 +23,7 @@ const {
 } = require('../services/progressionService');
 const { getGuildByKey } = require('../services/guildService');
 const { syncCampStatusMessage } = require('../services/campStatusService');
+const { buildLevelUpMessage } = require('../services/messages');
 
 const SAMMELN_COOLDOWN_MS = parseDurationMs(process.env.SAMMELN_COOLDOWN_MINUTES, 10 * 60 * 1000, 60 * 1000);
 const ARBEITEN_COOLDOWN_MS = parseDurationMs(process.env.ARBEITEN_COOLDOWN_MINUTES, 8 * 60 * 1000, 60 * 1000);
@@ -140,6 +141,29 @@ function formatRemaining(ms) {
   }
 
   return `${minutes}m ${seconds}s`;
+}
+
+async function announceLevelUp(client, previousPlayer, updatedPlayer) {
+  if (!updatedPlayer || !previousPlayer) return;
+  if ((updatedPlayer.level || 1) <= (previousPlayer.level || 1)) return;
+
+  const chatChannelId = process.env.CHAT_CHANNEL_ID;
+  if (!chatChannelId) return;
+
+  const message = buildLevelUpMessage(updatedPlayer, previousPlayer.level);
+  if (!message) return;
+
+  try {
+    const chatChannel = await client.channels.fetch(chatChannelId).catch(() => null);
+
+    if (!chatChannel || !chatChannel.isTextBased()) {
+      return;
+    }
+
+    await chatChannel.send({ content: message }).catch(() => null);
+  } catch (error) {
+    console.error('Levelaufstieg konnte nicht im Chat gepostet werden:', error);
+  }
 }
 
 function getBusyActivityLabel(activityKey) {
@@ -445,7 +469,7 @@ function maybeResolveCompletedActivity(player) {
   };
 }
 
-function runSammeln(player) {
+async function runSammeln(player, interaction) {
   const busy = getBusyStatus(player);
   if (busy.isBusy) {
     return buildBusyPayload(player);
@@ -465,6 +489,8 @@ function runSammeln(player) {
   const cooldownUntil = new Date(Date.now() + SAMMELN_COOLDOWN_MS).toISOString();
   setActionCooldown(player.discord_user_id, 'sammeln', cooldownUntil);
 
+  await announceLevelUp(interaction.client, player, updatedPlayer);
+
   const levelUpText = updatedPlayer && updatedPlayer.level > player.level
     ? `\n\n🎉 **Levelaufstieg!** Du bist jetzt Level **${updatedPlayer.level}**.`
     : '';
@@ -482,7 +508,7 @@ function runSammeln(player) {
   });
 }
 
-function runArbeiten(player) {
+async function runArbeiten(player, interaction) {
   const busy = getBusyStatus(player);
   if (busy.isBusy) {
     return buildBusyPayload(player);
@@ -508,6 +534,8 @@ function runArbeiten(player) {
   const cooldownUntil = new Date(Date.now() + ARBEITEN_COOLDOWN_MS).toISOString();
   setActionCooldown(player.discord_user_id, 'arbeiten', cooldownUntil);
 
+  await announceLevelUp(interaction.client, player, updatedPlayer);
+
   const levelUpText = updatedPlayer && updatedPlayer.level > player.level
     ? `\n\n🎉 **Levelaufstieg!** Du bist jetzt Level **${updatedPlayer.level}**.`
     : '';
@@ -525,7 +553,7 @@ function runArbeiten(player) {
   });
 }
 
-function runTrainieren(player) {
+async function runTrainieren(player, interaction) {
   const busy = getBusyStatus(player);
   if (busy.isBusy) {
     return buildBusyPayload(player);
@@ -551,6 +579,8 @@ function runTrainieren(player) {
   const updatedPlayer = updatePlayerProgress(player.discord_user_id, { xp });
   const cooldownUntil = new Date(Date.now() + TRAINIEREN_COOLDOWN_MS).toISOString();
   setActionCooldown(player.discord_user_id, 'trainieren', cooldownUntil);
+
+  await announceLevelUp(interaction.client, player, updatedPlayer);
 
   const levelUpText = updatedPlayer && updatedPlayer.level > player.level
     ? `\n\n🎉 **Levelaufstieg!** Du bist jetzt Level **${updatedPlayer.level}**.`
@@ -726,20 +756,19 @@ module.exports = {
       }
 
       if (value === 'sammeln') {
-        await interaction.editReply(runSammeln(player)).catch(() => null);
+        await interaction.editReply(await runSammeln(player, interaction)).catch(() => null);
         await syncCampStatusMessage(interaction.client);
         return true;
       }
 
       if (value === 'arbeiten') {
-        await interaction.editReply(runArbeiten(player)).catch(() => null);
+        await interaction.editReply(await runArbeiten(player, interaction)).catch(() => null);
         await syncCampStatusMessage(interaction.client);
         return true;
       }
 
       if (value === 'trainieren') {
-        await interaction.editReply(runTrainieren(player)).catch(() => null);
-        await syncCampStatusMessage(interaction.client);
+        await interaction.editReply(await runTrainieren(player, interaction)).catch(() => null); await syncCampStatusMessage(interaction.client);
         return true;
       }
 

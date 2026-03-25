@@ -19,4 +19,31 @@ function buildWelcomeMessage(player) {
   return pickRandom(templates);
 }
 
-module.exports = { buildWelcomeMessage };
+function buildLevelUpMessage(player, previousLevel) {
+  const starter = starterConfigs.find(item => item.key === player.pokemon_key);
+  const guild = guildConfigs.find(item => item.key === player.guild_key);
+
+  const fromLevel = Number(previousLevel) || 1;
+  const toLevel = Number(player.level) || fromLevel;
+
+  if (toLevel <= fromLevel) {
+    return null;
+  }
+
+  const levelText =
+    toLevel === fromLevel + 1
+      ? `ist auf **Level ${toLevel}** aufgestiegen`
+      : `ist von **Level ${fromLevel}** auf **Level ${toLevel}** aufgestiegen`;
+
+  return (
+    `🎉 **Levelaufstieg!**\n` +
+    `**${player.discord_username}** ${levelText}.\n` +
+    `Partner-Pokémon: **${starter?.name ?? player.pokemon_key}** ${starter?.emoji ?? ''}\n` +
+    `Gilde: **${guild?.name ?? player.guild_key}** ${guild?.emoji ?? ''}`
+  );
+}
+
+module.exports = {
+  buildWelcomeMessage,
+  buildLevelUpMessage
+};
