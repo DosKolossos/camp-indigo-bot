@@ -85,18 +85,6 @@ function getPlayerHeadline(player) {
   };
 }
 
-function getXpProgress(player) {
-  const currentLevelXp = Math.max(0, (player.level - 1) * XP_PER_LEVEL);
-  const xpInLevel = Math.max(0, player.xp - currentLevelXp);
-
-  return {
-    xpInLevel,
-    totalNeeded: XP_PER_LEVEL,
-    nextLevel: player.level + 1,
-    text: `${xpInLevel}/${XP_PER_LEVEL} XP bis Level ${player.level + 1}`
-  };
-}
-
 function getXpProgressText(player) {
   const progress = getXpProgress(player.xp);
 
@@ -162,7 +150,7 @@ function getActionStatus(player) {
 
 function buildActionMenu(player) {
   const { starter, guild, text } = getPlayerHeadline(player);
-  const progress = getXpProgress(player);
+  const progress = getXpProgress(player.xp);
   const cooldowns = getActionStatus(player);
 
   const embed = new EmbedBuilder()
@@ -180,7 +168,7 @@ function buildActionMenu(player) {
     .addFields(
       {
         name: 'Fortschritt',
-        value: `Level **${player.level}**\n${progress.text}`,
+        value: `Level **${player.level}**\n${getXpProgressText(player)}`,
         inline: false
       },
       {
