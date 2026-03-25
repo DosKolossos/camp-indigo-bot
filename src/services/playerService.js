@@ -268,6 +268,54 @@ function deleteAllPlayers() {
   return db.prepare(`DELETE FROM players`).run();
 }
 
+function logPlayerActivity(discordUserId, actionKey, changes = {}) {
+  const now = new Date().toISOString();
+
+  db.prepare(`
+    INSERT INTO player_activity_log (
+      discord_user_id,
+      action_key,
+      contribution_delta,
+      xp_delta,
+      wood_delta,
+      food_delta,
+      stone_delta,
+      created_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    discordUserId,
+    actionKey || null,
+    Number(changes.contribution) || 0,
+    Number(changes.xp) || 0,
+    Number(changes.wood) || 0,
+    Number(changes.food) || 0,
+    Number(changes.stone) || 0,
+    now
+  );
+}
+
+function getTopContributorLast24Hours() {
+  const since = new Date(Date.now() - (24 * 60 * 60 * 1000)).toISOString();
+
+  return db.prepare(`
+    SELECT
+      p.discord_user_id,
+      p.discord_username,
+      p.guild_key,
+      COALESCE(SUM(l.contribution_delta), 0) as contribution_24h,
+      COALESCE(SUM(l.xp_delta), 0) as xp_24h
+    FROM player_activity_log l
+    JOIN players p
+      ON p.discord_user_id = l.discord_user_id
+    WHERE l.created_at >= ?
+    GROUP BY p.discord_user_id, p.discord_username, p.guild_key
+    HAVING contribution_24h > 0 OR xp_24h > 0
+    ORDER BY contribution_24h DESC, xp_24h DESC, p.discord_username ASC
+    LIMIT 1
+  `).get(since);
+}
+
 module.exports = {
   ACTION_COOLDOWN_FIELDS,
   getPlayerByDiscordUserId,
@@ -285,4 +333,6 @@ module.exports = {
   deleteAllPlayers,
   setBusyState,
   clearBusyState,
+  logPlayerActivity,
+  getTopContributorLast24Hours
 };

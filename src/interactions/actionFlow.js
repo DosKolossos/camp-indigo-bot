@@ -12,7 +12,8 @@ const guilds = require('../config/guilds');
 const {
   getPlayerByDiscordUserId,
   getCampTotals,
-  setActionCooldown
+  setActionCooldown,
+  logPlayerActivity
 } = require('../services/playerService');
 const { applyProgressWithLevelUpAnnouncement } = require('../services/levelUpService');
 const { syncCampStatusMessage } = require('../services/campStatusService');
@@ -391,6 +392,12 @@ async function runSammeln(player, interaction) {
     changes: { wood, food, stone, xp }
   });
 
+  logPlayerActivity(player.discord_user_id, 'sammeln', {
+    wood,
+    food,
+    stone,
+    xp
+  });
   const cooldownUntil = new Date(Date.now() + SAMMELN_COOLDOWN_MS).toISOString();
   setActionCooldown(player.discord_user_id, 'sammeln', cooldownUntil);
 
@@ -441,6 +448,13 @@ async function runArbeiten(player, interaction) {
       stone,
       xp
     }
+  });
+
+  logPlayerActivity(player.discord_user_id, 'arbeiten', {
+    contribution,
+    wood,
+    stone,
+    xp
   });
 
   const cooldownUntil = new Date(Date.now() + ARBEITEN_COOLDOWN_MS).toISOString();
@@ -497,6 +511,10 @@ Aktuell ist euer Camp auf **Stufe ${camp.level}**.`
     client: interaction.client,
     discordUserId: player.discord_user_id,
     changes: { xp }
+  });
+
+  logPlayerActivity(player.discord_user_id, 'trainieren', {
+    xp
   });
 
   const cooldownUntil = new Date(Date.now() + TRAINIEREN_COOLDOWN_MS).toISOString();

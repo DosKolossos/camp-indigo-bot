@@ -55,6 +55,20 @@ db.exec(`
   );
 `);
 
+db.exec(`
+  CREATE TABLE IF NOT EXISTS player_activity_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    discord_user_id TEXT NOT NULL,
+    action_key TEXT,
+    contribution_delta INTEGER NOT NULL DEFAULT 0,
+    xp_delta INTEGER NOT NULL DEFAULT 0,
+    wood_delta INTEGER NOT NULL DEFAULT 0,
+    food_delta INTEGER NOT NULL DEFAULT 0,
+    stone_delta INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL
+  );
+`);
+
 ensureColumn('players', 'sammeln_cooldown_until', 'TEXT');
 ensureColumn('players', 'arbeiten_cooldown_until', 'TEXT');
 ensureColumn('players', 'trainieren_cooldown_until', 'TEXT');
