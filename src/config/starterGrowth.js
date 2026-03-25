@@ -14,6 +14,4 @@ module.exports = {
   rowlet:     { kraft: 0.35, tempo: 0.50, ausdauer: 0.55, instinkt: 0.65, geschick: 0.65 },
   totodile:   { kraft: 0.75, tempo: 0.45, ausdauer: 0.70, instinkt: 0.30, geschick: 0.30 },
   fuecoco:    { kraft: 0.55, tempo: 0.25, ausdauer: 0.90, instinkt: 0.35, geschick: 0.25 },
-  incineroar: { kraft: 0.55, tempo: 0.25, ausdauer: 0.90, instinkt: 0.35, geschick: 0.25 },
-
 };
