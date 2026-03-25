@@ -8,19 +8,30 @@ const {
 } = require('discord.js');
 
 const starters = require('../config/starters');
-const guilds = require('../config/guilds');
 const {
   getPlayerByDiscordUserId,
   createPlayer
 } = require('../services/playerService');
 const { ensureGuildRole } = require('../services/guildRoleService');
+const { getGuilds, getGuildByKey } = require('../services/guildService');
 
 function getStarter(key) {
   return starters.find(starter => starter.key === key) || starters[0];
 }
 
+function getFirstGuild() {
+  return getGuilds()[0] || {
+    key: 'default',
+    name: 'Camp Indigo',
+    emoji: '🏳️',
+    description: 'Standardgilde',
+    color: 0x5865f2,
+    roleName: 'Camp Indigo'
+  };
+}
+
 function getGuild(key) {
-  return guilds.find(guild => guild.key === key) || guilds[0];
+  return getGuildByKey(key) || getFirstGuild();
 }
 
 function buildStatsText(stats) {
@@ -95,6 +106,7 @@ function buildStarterPayload(selectedKey) {
 
 function buildGuildPayload(starterKey, guildKey) {
   const starter = getStarter(starterKey);
+  const guilds = getGuilds();
   const guild = getGuild(guildKey);
 
   const embed = new EmbedBuilder()
@@ -113,7 +125,7 @@ function buildGuildPayload(starterKey, guildKey) {
     .addOptions(
       guilds.map(item => ({
         label: item.name,
-        description: item.description.slice(0, 100),
+        description: item.description.slice(0, 100) || 'Keine Beschreibung hinterlegt',
         value: item.key,
         default: item.key === guild.key
       }))
@@ -145,7 +157,7 @@ function buildWelcomeMessage(username, starter, guild) {
 
 async function assignGuildRole(interaction, guildConfig) {
   const member = await interaction.guild.members.fetch(interaction.user.id);
-  const rolesToRemove = guilds
+  const rolesToRemove = getGuilds()
     .map(item => interaction.guild.roles.cache.find(role => role.name === item.roleName))
     .filter(Boolean);
 
@@ -176,7 +188,7 @@ module.exports = {
 
       if (interaction.customId.startsWith('camp:starter:confirm:')) {
         const starterKey = interaction.customId.split(':')[3];
-        return interaction.update(buildGuildPayload(starterKey, guilds[0].key));
+        return interaction.update(buildGuildPayload(starterKey, getFirstGuild().key));
       }
 
       if (interaction.customId.startsWith('camp:guild:confirm:')) {

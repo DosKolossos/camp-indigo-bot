@@ -53,6 +53,33 @@ async function findExistingActionsMessage(client) {
   return { channel, message };
 }
 
+
+async function findPanelMessageByScan(channel) {
+  if (!channel || !channel.isTextBased() || !channel.messages?.fetch) {
+    return null;
+  }
+
+  const recentMessages = await channel.messages.fetch({ limit: 50 }).catch(() => null);
+  if (!recentMessages) {
+    return null;
+  }
+
+  for (const message of recentMessages.values()) {
+    const firstEmbed = message.embeds?.[0];
+    const button = message.components?.[0]?.components?.[0];
+
+    if (
+      message.author?.id === channel.client.user?.id &&
+      firstEmbed?.title === '⚔️ Camp-Aktionen' &&
+      button?.customId === 'camp:actions:open'
+    ) {
+      return { channel, message };
+    }
+  }
+
+  return null;
+}
+
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('setup-actions')
@@ -82,7 +109,9 @@ module.exports = {
     }
 
     const payload = buildActionsMessage();
-    const existing = await findExistingActionsMessage(interaction.client);
+    const existing =
+      await findExistingActionsMessage(interaction.client) ||
+      await findPanelMessageByScan(targetChannel);
 
     let finalMessage;
     let infoText;

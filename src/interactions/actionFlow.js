@@ -8,25 +8,28 @@ const {
 } = require('discord.js');
 
 const starters = require('../config/starters');
-const guilds = require('../config/guilds');
 const {
   getPlayerByDiscordUserId,
   updatePlayerProgress,
   getCampTotals,
-  setActionCooldown
+  setActionCooldown,
+  setBusyState,
+  clearBusyState
 } = require('../services/playerService');
-
 const {
   getXpProgress,
   getCampProgress,
   calculateScaledStats
 } = require('../services/progressionService');
+const { getGuildByKey } = require('../services/guildService');
 
 const SAMMELN_COOLDOWN_MS = parseDurationMs(process.env.SAMMELN_COOLDOWN_MINUTES, 10 * 60 * 1000, 60 * 1000);
 const ARBEITEN_COOLDOWN_MS = parseDurationMs(process.env.ARBEITEN_COOLDOWN_MINUTES, 8 * 60 * 1000, 60 * 1000);
 const TRAINIEREN_COOLDOWN_MS = parseDurationMs(process.env.TRAINIEREN_COOLDOWN_MINUTES, 12 * 60 * 1000, 60 * 1000);
+const ERKUNDEN_DURATION_MS = parseDurationMs(process.env.ERKUNDEN_DURATION_MINUTES, 15 * 60 * 1000, 60 * 1000);
 
 const TRAINIEREN_UNLOCK_CAMP_LEVEL = 2;
+const ERKUNDEN_UNLOCK_CAMP_LEVEL = 3;
 
 function parseDurationMs(envValue, fallback, multiplier = 1) {
   const numericValue = Number(envValue);
@@ -74,7 +77,7 @@ function getStarter(key) {
 }
 
 function getGuild(key) {
-  return guilds.find(item => item.key === key) || null;
+  return getGuildByKey(key);
 }
 
 function getXpProgressText(player) {
@@ -237,6 +240,24 @@ function buildCooldownPayload(actionLabel, remainingMs) {
   });
 }
 
+function buildExploreReadyPayload(result, playerBefore, playerAfter) {
+  const levelUpText = playerAfter && playerAfter.level > playerBefore.level
+    ? `\n\n🎉 **Levelaufstieg!** Du bist jetzt Level **${playerAfter.level}**.`
+    : '';
+
+  return buildActionResultPayload({
+    title: '🧭 Erkundung abgeschlossen',
+    description:
+      `Du kehrst von deiner Erkundung zurück.\n\n` +
+      `+${result.xp} XP\n` +
+      `+${result.food} Nahrung\n` +
+      `+${result.stone} Stein\n` +
+      `+${result.contribution} Lagerbeitrag\n\n` +
+      `Dein Team hat neue Pfade und sichere Wege rund um das Camp entdeckt.${levelUpText}`,
+    color: 0x1abc9c
+  });
+}
+
 function buildActionMenu(player) {
   const starter = getStarter(player.pokemon_key);
   const guild = getGuild(player.guild_key);
@@ -245,6 +266,8 @@ function buildActionMenu(player) {
   const camp = getCampState().progress;
 
   const trainingUnlocked = camp.level >= TRAINIEREN_UNLOCK_CAMP_LEVEL;
+  const exploringUnlocked = camp.level >= ERKUNDEN_UNLOCK_CAMP_LEVEL;
+
   const trainingDescription = busy.isBusy
     ? `Gesperrt: Du bist auf ${getBusyActivityLabel(busy.activityKey)}`
     : !trainingUnlocked
@@ -252,6 +275,12 @@ function buildActionMenu(player) {
       : cooldowns.trainierenRemaining > 0
         ? `Wieder bereit in ${formatRemaining(cooldowns.trainierenRemaining)}`
         : 'Steigere deine Werte über XP';
+
+  const exploreDescription = busy.isBusy
+    ? `Bereits unterwegs: ${getBusyActivityLabel(busy.activityKey)}`
+    : !exploringUnlocked
+      ? `Freischaltung ab Camp-Stufe ${ERKUNDEN_UNLOCK_CAMP_LEVEL}`
+      : `Verlasse das Camp für ${formatRemaining(ERKUNDEN_DURATION_MS)}`;
 
   const embed = new EmbedBuilder()
     .setTitle('🎮 Deine Aktionen')
@@ -265,7 +294,8 @@ function buildActionMenu(player) {
       `${busy.label}\n` +
       `${cooldowns.sammelnLabel}\n` +
       `${cooldowns.arbeitenLabel}\n` +
-      `${trainingUnlocked ? cooldowns.trainierenLabel : `🔒 Trainieren ab Camp-Stufe ${TRAINIEREN_UNLOCK_CAMP_LEVEL}`}\n\n` +
+      `${trainingUnlocked ? cooldowns.trainierenLabel : `🔒 Trainieren ab Camp-Stufe ${TRAINIEREN_UNLOCK_CAMP_LEVEL}`}\n` +
+      `${exploringUnlocked ? '🧭 Erkunden freigeschaltet' : `🔒 Erkunden ab Camp-Stufe ${ERKUNDEN_UNLOCK_CAMP_LEVEL}`}\n\n` +
       'Wähle deine nächste Aktion.'
     )
     .setFooter({
@@ -308,6 +338,12 @@ function buildActionMenu(player) {
         description: trainingDescription,
         value: 'trainieren',
         emoji: '💪'
+      },
+      {
+        label: 'Erkunden',
+        description: exploreDescription,
+        value: 'erkunden',
+        emoji: '🧭'
       },
       {
         label: 'Lagerstatus',
@@ -367,6 +403,45 @@ function buildProfilePayload(player) {
 
 function randomInt(min, max) {
   return Math.floor(Math.random() * (max - min + 1)) + min;
+}
+
+function maybeResolveCompletedActivity(player) {
+  if (!player?.busy_activity || !player?.busy_until) {
+    return { player, completionPayload: null };
+  }
+
+  const busyRemaining = getBusyRemainingMs(player);
+  if (busyRemaining > 0) {
+    return { player, completionPayload: null };
+  }
+
+  clearBusyState(player.discord_user_id);
+
+  if (player.busy_activity === 'erkunden') {
+    const result = {
+      xp: randomInt(8, 12),
+      food: randomInt(1, 3),
+      stone: randomInt(0, 2),
+      contribution: randomInt(1, 2)
+    };
+
+    const updatedPlayer = updatePlayerProgress(player.discord_user_id, result);
+
+    return {
+      player: updatedPlayer,
+      completionPayload: buildExploreReadyPayload(result, player, updatedPlayer)
+    };
+  }
+
+  const refreshedPlayer = getPlayerByDiscordUserId(player.discord_user_id);
+  return {
+    player: refreshedPlayer,
+    completionPayload: buildActionResultPayload({
+      title: '✅ Rückkehr ins Camp',
+      description: 'Du bist wieder im Camp angekommen.',
+      color: 0x3498db
+    })
+  };
 }
 
 function runSammeln(player) {
@@ -491,6 +566,34 @@ function runTrainieren(player) {
   });
 }
 
+function runErkunden(player) {
+  const busy = getBusyStatus(player);
+  if (busy.isBusy) {
+    return buildBusyPayload(player);
+  }
+
+  const camp = getCampState().progress;
+  if (camp.level < ERKUNDEN_UNLOCK_CAMP_LEVEL) {
+    return buildLockedPayload(
+      '🔒 Erkunden noch nicht freigeschaltet',
+      `Erkundungen werden erst ab **Camp-Stufe ${ERKUNDEN_UNLOCK_CAMP_LEVEL}** vorbereitet.\n\nAktuell ist euer Camp auf **Stufe ${camp.level}**.`
+    );
+  }
+
+  const until = new Date(Date.now() + ERKUNDEN_DURATION_MS).toISOString();
+  setBusyState(player.discord_user_id, 'erkunden', until);
+
+  return buildActionResultPayload({
+    title: '🧭 Erkundung gestartet',
+    description:
+      `Du verlässt das Camp und erkundest die Umgebung.\n\n` +
+      `Rückkehr in **${formatRemaining(ERKUNDEN_DURATION_MS)}**.\n` +
+      `Währenddessen sind Sammeln, Arbeiten und Trainieren gesperrt.` +
+      `\n\nSobald du zurück bist, erhältst du deinen Erkundungsbericht automatisch im Menü.`,
+    color: 0x1abc9c
+  });
+}
+
 function buildLagerPayload() {
   const { totals, progress: camp } = getCampState();
 
@@ -523,6 +626,15 @@ function buildLagerPayload() {
   };
 }
 
+function loadPlayerForAction(discordUserId) {
+  const player = getPlayerByDiscordUserId(discordUserId);
+  if (!player) {
+    return { player: null, completionPayload: null };
+  }
+
+  return maybeResolveCompletedActivity(player);
+}
+
 module.exports = {
   canHandleInteraction(interaction) {
     return Boolean(
@@ -540,7 +652,7 @@ module.exports = {
       const ok = await safeDeferReply(interaction);
       if (!ok) return false;
 
-      const player = getPlayerByDiscordUserId(interaction.user.id);
+      const { player, completionPayload } = loadPlayerForAction(interaction.user.id);
 
       if (!player) {
         await interaction.editReply({
@@ -551,7 +663,7 @@ module.exports = {
         return true;
       }
 
-      await interaction.editReply(buildActionMenu(player)).catch(() => null);
+      await interaction.editReply(completionPayload || buildActionMenu(player)).catch(() => null);
       return true;
     }
 
@@ -559,7 +671,7 @@ module.exports = {
       const ok = await safeDeferUpdate(interaction);
       if (!ok) return false;
 
-      const player = getPlayerByDiscordUserId(interaction.user.id);
+      const { player, completionPayload } = loadPlayerForAction(interaction.user.id);
 
       if (!player) {
         await interaction.editReply({
@@ -570,7 +682,7 @@ module.exports = {
         return true;
       }
 
-      await interaction.editReply(buildActionMenu(player)).catch(() => null);
+      await interaction.editReply(completionPayload || buildActionMenu(player)).catch(() => null);
       return true;
     }
 
@@ -578,7 +690,7 @@ module.exports = {
       const ok = await safeDeferUpdate(interaction);
       if (!ok) return false;
 
-      const player = getPlayerByDiscordUserId(interaction.user.id);
+      const { player, completionPayload } = loadPlayerForAction(interaction.user.id);
 
       if (!player) {
         await interaction.editReply({
@@ -586,6 +698,11 @@ module.exports = {
           embeds: [],
           components: []
         }).catch(() => null);
+        return true;
+      }
+
+      if (completionPayload) {
+        await interaction.editReply(completionPayload).catch(() => null);
         return true;
       }
 
@@ -608,6 +725,11 @@ module.exports = {
 
       if (value === 'trainieren') {
         await interaction.editReply(runTrainieren(player)).catch(() => null);
+        return true;
+      }
+
+      if (value === 'erkunden') {
+        await interaction.editReply(runErkunden(player)).catch(() => null);
         return true;
       }
 

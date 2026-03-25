@@ -1,18 +1,19 @@
-const guildConfigs = require('../config/guilds');
+const { getGuildByKey } = require('./guildService');
 
 async function ensureGuildRole(guild, guildKey) {
-  const config = guildConfigs.find(item => item.key === guildKey);
+  const config = getGuildByKey(guildKey);
   if (!config) {
     throw new Error(`Unbekannte Gilde: ${guildKey}`);
   }
 
-  let role = guild.roles.cache.find(item => item.name === config.name);
+  let role = guild.roles.cache.find(item => item.name === config.roleName);
   if (role) return role;
 
   role = await guild.roles.create({
-    name: config.name,
+    name: config.roleName,
     color: config.color,
-    reason: `Camp Indigo Standardgilde ${config.name} anlegen`
+    mentionable: false,
+    reason: `Camp Indigo Gildenrolle für ${config.name}`
   });
 
   return role;

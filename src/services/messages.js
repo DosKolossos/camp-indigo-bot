@@ -1,5 +1,5 @@
 const starterConfigs = require('../config/starters');
-const guildConfigs = require('../config/guilds');
+const { getGuildByKey } = require('./guildService');
 
 function pickRandom(items) {
   return items[Math.floor(Math.random() * items.length)];
@@ -7,7 +7,7 @@ function pickRandom(items) {
 
 function buildWelcomeMessage(player) {
   const starter = starterConfigs.find(item => item.key === player.pokemon_key);
-  const guild = guildConfigs.find(item => item.key === player.guild_key);
+  const guild = getGuildByKey(player.guild_key);
 
   const templates = [
     `🎉 **${player.discord_username}** ist Camp Indigo beigetreten!\nPartner-Pokémon: **${starter?.name ?? player.pokemon_key}**\nGilde: **${guild?.name ?? player.guild_key}** ${guild?.emoji ?? ''}`,
