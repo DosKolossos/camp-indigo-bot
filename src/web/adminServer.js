@@ -290,15 +290,17 @@ function renderDashboard(players, totals, notice, message) {
     : '<tr><td colspan="9" class="muted">Noch keine Spielstände vorhanden.</td></tr>';
 
   return `
-    <div class="topbar">
-      <div>
-        <div class="title">Camp Indigo – Admin</div>
-        <div class="subtitle">Spielstände verwalten, Cooldowns zurücksetzen und Testdaten bereinigen.</div>
-      </div>
-      <div class="actions">
-        <a class="btn btn-primary" href="/admin/export.json">Export JSON</a>
-      </div>
-    </div>
+<div class="topbar">
+  <div>
+    <div class="title">Camp Indigo Admin</div>
+    <div class="subtitle">Spielstände, Cooldowns und Testverwaltung</div>
+  </div>
+
+  <div class="actions">
+    <a href="/admin" class="btn btn-primary">Aktualisieren</a>
+    <a href="/admin/export.json" class="btn">JSON-Export</a>
+  </div>
+</div>
     ${noticeHtml}
     <div class="panel">
       <div class="grid grid-4">
