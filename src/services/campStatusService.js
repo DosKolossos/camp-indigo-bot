@@ -2,10 +2,8 @@ const path = require('path');
 const fs = require('fs');
 const { AttachmentBuilder, EmbedBuilder } = require('discord.js');
 const { getState, setState } = require('./stateService');
-const { allPlayers, getCampTotals } = require('./playerService');
-const { getCampProgress } = require('./progressionService');
-
 const { allPlayers, getCampTotals, getTopContributorLast24Hours } = require('./playerService');
+const { getCampProgress } = require('./progressionService');
 
 let CanvasLib = null;
 try {
