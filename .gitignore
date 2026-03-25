@@ -1,3 +1,9 @@
 node_modules
 .env
 camp_indigo.db
+camp_indigo.db-shm
+camp_indigo.db-wal
+data/
+*.db
+*.db-shm
+*.db-wal

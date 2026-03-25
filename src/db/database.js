@@ -1,7 +1,17 @@
+const fs = require('fs');
 const path = require('path');
 const Database = require('better-sqlite3');
 
-const dbPath = path.join(process.cwd(), 'camp_indigo.db');
+const dataDir =
+  process.env.DB_DIR ||
+  process.env.RAILWAY_VOLUME_MOUNT_PATH ||
+  '/data';
+
+fs.mkdirSync(dataDir, { recursive: true });
+
+const dbPath = process.env.DB_PATH || path.join(dataDir, 'camp_indigo.db');
+console.log(`[db] using sqlite file: ${dbPath}`);
+
 const db = new Database(dbPath);
 db.pragma('journal_mode = WAL');
 db.pragma('foreign_keys = ON');
@@ -31,6 +41,9 @@ db.exec(`
     guild_role_id TEXT,
     sammeln_cooldown_until TEXT,
     arbeiten_cooldown_until TEXT,
+    trainieren_cooldown_until TEXT,
+    busy_until TEXT,
+    busy_activity TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
   );
@@ -44,5 +57,8 @@ db.exec(`
 
 ensureColumn('players', 'sammeln_cooldown_until', 'TEXT');
 ensureColumn('players', 'arbeiten_cooldown_until', 'TEXT');
+ensureColumn('players', 'trainieren_cooldown_until', 'TEXT');
+ensureColumn('players', 'busy_until', 'TEXT');
+ensureColumn('players', 'busy_activity', 'TEXT');
 
 module.exports = db;
