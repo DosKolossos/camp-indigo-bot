@@ -4,6 +4,7 @@ const { AttachmentBuilder, EmbedBuilder } = require('discord.js');
 const { getState, setState } = require('./stateService');
 const { allPlayers, getCampTotals, getTopContributorLast24Hours } = require('./playerService');
 const { getCampProgress } = require('./progressionService');
+const guilds = require('../config/guilds');
 
 let CanvasLib = null;
 try {
@@ -45,6 +46,14 @@ function getCampAssetPath(level) {
   }
 
   return null;
+}
+
+function getCampStatusChannelStateKey(guildKey) {
+  return `camp_status_channel_id:${guildKey}`;
+}
+
+function getCampStatusMessageStateKey(guildKey) {
+  return `camp_status_message_id:${guildKey}`;
 }
 
 function getUnlockedFeatures(level) {
@@ -344,9 +353,30 @@ async function buildCampStatusPayload() {
   };
 }
 
-async function findExistingCampStatusMessage(client) {
-  const savedChannelId = getState(CAMP_STATUS_CHANNEL_KEY);
-  const savedMessageId = getState(CAMP_STATUS_MESSAGE_KEY);
+function getGuildConfig(guildKey) {
+  return guilds.find(guild => guild.key === guildKey) || null;
+}
+
+function isGuildKey(value) {
+  return guilds.some(guild => guild.key === value);
+}
+
+function resolveProgressChannelId(guildKey) {
+  const guild = getGuildConfig(guildKey);
+  return guild?.progressChannelId || null;
+}
+
+async function findExistingCampStatusMessage(client, guildKey = null) {
+  const channelStateKey = guildKey
+    ? getCampStatusChannelStateKey(guildKey)
+    : CAMP_STATUS_CHANNEL_KEY;
+
+  const messageStateKey = guildKey
+    ? getCampStatusMessageStateKey(guildKey)
+    : CAMP_STATUS_MESSAGE_KEY;
+
+  const savedChannelId = getState(channelStateKey);
+  const savedMessageId = getState(messageStateKey);
 
   if (!savedChannelId || !savedMessageId) return null;
 
@@ -378,13 +408,31 @@ async function findCampStatusMessageByScan(channel) {
   return null;
 }
 
-async function ensureCampStatusMessage(client, targetChannelId) {
+async function ensureCampStatusMessage(client, guildKeyOrChannelId, explicitTargetChannelId = null) {
+  const guildMode = isGuildKey(guildKeyOrChannelId);
+  const guildKey = guildMode ? guildKeyOrChannelId : null;
+
+  const targetChannelId = guildMode
+    ? (explicitTargetChannelId || resolveProgressChannelId(guildKey))
+    : (explicitTargetChannelId || guildKeyOrChannelId);
+
+  if (!targetChannelId) {
+    throw new Error(
+      guildKey
+        ? `Kein Fortschrittskanal für Gilde "${guildKey}" konfiguriert.`
+        : 'Camp-Status-Kanal konnte nicht aufgelöst werden.'
+    );
+  }
+
   const targetChannel = await client.channels.fetch(targetChannelId).catch(() => null);
   if (!targetChannel || !targetChannel.isTextBased()) {
     throw new Error('Camp-Status-Kanal konnte nicht gefunden werden.');
   }
 
-  const existing = await findExistingCampStatusMessage(client) || await findCampStatusMessageByScan(targetChannel);
+  const existing = guildMode
+    ? (await findExistingCampStatusMessage(client, guildKey)) || await findCampStatusMessageByScan(targetChannel)
+    : (await findExistingCampStatusMessage(client)) || await findCampStatusMessageByScan(targetChannel);
+
   const payload = await buildCampStatusPayload();
 
   let finalMessage;
@@ -400,21 +448,26 @@ async function ensureCampStatusMessage(client, targetChannelId) {
     finalMessage = await targetChannel.send(payload);
   }
 
-  setState(CAMP_STATUS_CHANNEL_KEY, targetChannel.id);
-  setState(CAMP_STATUS_MESSAGE_KEY, finalMessage.id);
+  if (guildMode) {
+    setState(getCampStatusChannelStateKey(guildKey), targetChannel.id);
+    setState(getCampStatusMessageStateKey(guildKey), finalMessage.id);
+  } else {
+    setState(CAMP_STATUS_CHANNEL_KEY, targetChannel.id);
+    setState(CAMP_STATUS_MESSAGE_KEY, finalMessage.id);
+  }
 
   return { channel: targetChannel, message: finalMessage };
 }
 
-async function syncCampStatusMessage(client) {
-  const channelId = getState(CAMP_STATUS_CHANNEL_KEY) || process.env.CAMP_STATUS_CHANNEL_ID || process.env.CHAT_CHANNEL_ID;
-  if (!channelId) return null;
+async function syncCampStatusMessage(client, guildKey) {
+  if (!guildKey) return null;
 
-  return ensureCampStatusMessage(client, channelId).catch(error => {
-    console.error('Camp-Status konnte nicht synchronisiert werden:', error);
+  return ensureCampStatusMessage(client, guildKey).catch(error => {
+    console.error(`Camp-Status für Gilde "${guildKey}" konnte nicht synchronisiert werden:`, error);
     return null;
   });
 }
+
 
 module.exports = {
   CAMP_STATUS_TITLE,

@@ -193,8 +193,8 @@ module.exports = {
           guildRoleId: role?.id ?? null
         });
 
-        await syncCampStatusMessage(interaction.client).catch(() => null);
-
+        await syncCampStatusMessage(interaction.client, guild.key).catch(() => null);
+        
         const chatChannel = await fetchGuildChatChannel(interaction.client, guild.key).catch(() => null);
         if (chatChannel) {
           await chatChannel.send({ content: buildWelcomeMessage(player) }).catch(() => null);

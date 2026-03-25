@@ -401,7 +401,7 @@ async function runSammeln(player, interaction) {
   const cooldownUntil = new Date(Date.now() + SAMMELN_COOLDOWN_MS).toISOString();
   setActionCooldown(player.discord_user_id, 'sammeln', cooldownUntil);
 
-  await syncCampStatusMessage(interaction.client).catch(() => null);
+  await syncCampStatusMessage(interaction.client, player.guild_key).catch(() => null);
 
   return buildActionResultPayload({
     title: '🌿 Sammeln abgeschlossen',
@@ -460,7 +460,7 @@ async function runArbeiten(player, interaction) {
   const cooldownUntil = new Date(Date.now() + ARBEITEN_COOLDOWN_MS).toISOString();
   setActionCooldown(player.discord_user_id, 'arbeiten', cooldownUntil);
 
-  await syncCampStatusMessage(interaction.client).catch(() => null);
+  await syncCampStatusMessage(interaction.client, player.guild_key).catch(() => null);
 
   return buildActionResultPayload({
     title: '🔨 Arbeit im Lager erledigt',
@@ -520,7 +520,7 @@ Aktuell ist euer Camp auf **Stufe ${camp.level}**.`
   const cooldownUntil = new Date(Date.now() + TRAINIEREN_COOLDOWN_MS).toISOString();
   setActionCooldown(player.discord_user_id, 'trainieren', cooldownUntil);
 
-  await syncCampStatusMessage(interaction.client).catch(() => null);
+  await syncCampStatusMessage(interaction.client, player.guild_key).catch(() => null);
 
   return buildActionResultPayload({
     title: '💪 Training abgeschlossen',
