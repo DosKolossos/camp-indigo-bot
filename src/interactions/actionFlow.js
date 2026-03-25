@@ -24,6 +24,9 @@ const {
 
 const SAMMELN_COOLDOWN_MS = parseDurationMs(process.env.SAMMELN_COOLDOWN_MINUTES, 10 * 60 * 1000, 60 * 1000);
 const ARBEITEN_COOLDOWN_MS = parseDurationMs(process.env.ARBEITEN_COOLDOWN_MINUTES, 8 * 60 * 1000, 60 * 1000);
+const TRAINIEREN_COOLDOWN_MS = parseDurationMs(process.env.TRAINIEREN_COOLDOWN_MINUTES, 12 * 60 * 1000, 60 * 1000);
+
+const TRAINIEREN_UNLOCK_CAMP_LEVEL = 2;
 
 function parseDurationMs(envValue, fallback, multiplier = 1) {
   const numericValue = Number(envValue);
@@ -74,17 +77,6 @@ function getGuild(key) {
   return guilds.find(item => item.key === key) || null;
 }
 
-function getPlayerHeadline(player) {
-  const starter = getStarter(player.pokemon_key);
-  const guild = getGuild(player.guild_key);
-
-  return {
-    starter,
-    guild,
-    text: `${starter?.name ?? player.pokemon_key} ${starter?.emoji ?? ''} • ${guild?.name ?? player.guild_key} ${guild?.emoji ?? ''}`.trim()
-  };
-}
-
 function getXpProgressText(player) {
   const progress = getXpProgress(player.xp);
 
@@ -124,6 +116,16 @@ function getCooldownRemainingMs(player, fieldName) {
   return Math.max(0, targetTime - Date.now());
 }
 
+function getBusyRemainingMs(player) {
+  const value = player?.busy_until;
+  if (!value) return 0;
+
+  const targetTime = new Date(value).getTime();
+  if (Number.isNaN(targetTime)) return 0;
+
+  return Math.max(0, targetTime - Date.now());
+}
+
 function formatRemaining(ms) {
   const totalSeconds = Math.ceil(ms / 1000);
   const minutes = Math.floor(totalSeconds / 60);
@@ -136,21 +138,120 @@ function formatRemaining(ms) {
   return `${minutes}m ${seconds}s`;
 }
 
+function getBusyActivityLabel(activityKey) {
+  switch (activityKey) {
+    case 'erkunden':
+      return 'Erkundung';
+    case 'expedition':
+      return 'Expedition';
+    default:
+      return 'einer Aktion';
+  }
+}
+
+function getBusyStatus(player) {
+  const remainingMs = getBusyRemainingMs(player);
+  const activityKey = player?.busy_activity || null;
+
+  if (remainingMs <= 0) {
+    return {
+      isBusy: false,
+      remainingMs: 0,
+      activityKey: null,
+      label: '🟢 Du bist im Camp verfügbar.'
+    };
+  }
+
+  const activityLabel = getBusyActivityLabel(activityKey);
+
+  return {
+    isBusy: true,
+    remainingMs,
+    activityKey,
+    label: `🧭 Du bist aktuell auf **${activityLabel}**.\nRückkehr in **${formatRemaining(remainingMs)}**.`
+  };
+}
+
 function getActionStatus(player) {
   const sammelnRemaining = getCooldownRemainingMs(player, 'sammeln_cooldown_until');
   const arbeitenRemaining = getCooldownRemainingMs(player, 'arbeiten_cooldown_until');
+  const trainierenRemaining = getCooldownRemainingMs(player, 'trainieren_cooldown_until');
 
   return {
     sammelnRemaining,
     arbeitenRemaining,
+    trainierenRemaining,
     sammelnLabel: sammelnRemaining > 0 ? `⏳ Sammeln in ${formatRemaining(sammelnRemaining)}` : '✅ Sammeln ist bereit',
-    arbeitenLabel: arbeitenRemaining > 0 ? `⏳ Arbeiten in ${formatRemaining(arbeitenRemaining)}` : '✅ Arbeiten ist bereit'
+    arbeitenLabel: arbeitenRemaining > 0 ? `⏳ Arbeiten in ${formatRemaining(arbeitenRemaining)}` : '✅ Arbeiten ist bereit',
+    trainierenLabel: trainierenRemaining > 0 ? `⏳ Trainieren in ${formatRemaining(trainierenRemaining)}` : '✅ Trainieren ist bereit'
   };
 }
 
+function getCampState() {
+  const totals = getCampTotals();
+  const progress = getCampProgress(totals.contribution);
+
+  return { totals, progress };
+}
+
+function buildLockedPayload(title, description) {
+  return {
+    content: '',
+    embeds: [
+      new EmbedBuilder()
+        .setTitle(title)
+        .setDescription(description)
+        .setColor(0xe74c3c)
+    ],
+    components: [buildBackRow()]
+  };
+}
+
+function buildBusyPayload(player) {
+  const busy = getBusyStatus(player);
+
+  return buildLockedPayload(
+    '🧭 Du bist gerade unterwegs',
+    `${busy.label}\n\nWährend du unterwegs bist, kannst du im Camp keine Dorfaktion starten.`
+  );
+}
+
+function buildActionResultPayload({ title, description, color = 0x2ecc71 }) {
+  return {
+    content: '',
+    embeds: [
+      new EmbedBuilder()
+        .setTitle(title)
+        .setDescription(description)
+        .setColor(color)
+    ],
+    components: [buildBackRow()]
+  };
+}
+
+function buildCooldownPayload(actionLabel, remainingMs) {
+  return buildActionResultPayload({
+    title: '⏳ Aktion noch nicht bereit',
+    description: `**${actionLabel}** ist noch auf Cooldown.\n\nBitte warte noch **${formatRemaining(remainingMs)}**.`,
+    color: 0xe67e22
+  });
+}
+
 function buildActionMenu(player) {
-  const { starter, guild } = getPlayerHeadline(player);
+  const starter = getStarter(player.pokemon_key);
+  const guild = getGuild(player.guild_key);
   const cooldowns = getActionStatus(player);
+  const busy = getBusyStatus(player);
+  const camp = getCampState().progress;
+
+  const trainingUnlocked = camp.level >= TRAINIEREN_UNLOCK_CAMP_LEVEL;
+  const trainingDescription = busy.isBusy
+    ? `Gesperrt: Du bist auf ${getBusyActivityLabel(busy.activityKey)}`
+    : !trainingUnlocked
+      ? `Freischaltung ab Camp-Stufe ${TRAINIEREN_UNLOCK_CAMP_LEVEL}`
+      : cooldowns.trainierenRemaining > 0
+        ? `Wieder bereit in ${formatRemaining(cooldowns.trainierenRemaining)}`
+        : 'Steigere deine Werte über XP';
 
   const embed = new EmbedBuilder()
     .setTitle('🎮 Deine Aktionen')
@@ -158,10 +259,13 @@ function buildActionMenu(player) {
       `**Pokémon:** ${starter?.name ?? player.pokemon_key} ${starter?.emoji ?? ''}\n` +
       `**Gilde:** ${guild?.name ?? player.guild_key} ${guild?.emoji ?? ''}\n` +
       `**Level:** ${player.level}\n` +
-      `**Fortschritt:** ${getXpProgressText(player)}\n\n` +
+      `**Fortschritt:** ${getXpProgressText(player)}\n` +
+      `**Camp-Stufe:** ${camp.level}\n\n` +
       `**Status**\n` +
+      `${busy.label}\n` +
       `${cooldowns.sammelnLabel}\n` +
-      `${cooldowns.arbeitenLabel}\n\n` +
+      `${cooldowns.arbeitenLabel}\n` +
+      `${trainingUnlocked ? cooldowns.trainierenLabel : `🔒 Trainieren ab Camp-Stufe ${TRAINIEREN_UNLOCK_CAMP_LEVEL}`}\n\n` +
       'Wähle deine nächste Aktion.'
     )
     .setFooter({
@@ -181,19 +285,29 @@ function buildActionMenu(player) {
       },
       {
         label: 'Sammeln',
-        description: cooldowns.sammelnRemaining > 0
-          ? `Wieder bereit in ${formatRemaining(cooldowns.sammelnRemaining)}`
-          : 'Sammle Holz, Nahrung, Stein und XP',
+        description: busy.isBusy
+          ? `Gesperrt: Du bist auf ${getBusyActivityLabel(busy.activityKey)}`
+          : cooldowns.sammelnRemaining > 0
+            ? `Wieder bereit in ${formatRemaining(cooldowns.sammelnRemaining)}`
+            : 'Sammle Holz, Nahrung, Stein und XP',
         value: 'sammeln',
         emoji: '🌿'
       },
       {
         label: 'Arbeiten',
-        description: cooldowns.arbeitenRemaining > 0
-          ? `Wieder bereit in ${formatRemaining(cooldowns.arbeitenRemaining)}`
-          : 'Hilf dem Lager beim Ausbau',
+        description: busy.isBusy
+          ? `Gesperrt: Du bist auf ${getBusyActivityLabel(busy.activityKey)}`
+          : cooldowns.arbeitenRemaining > 0
+            ? `Wieder bereit in ${formatRemaining(cooldowns.arbeitenRemaining)}`
+            : 'Hilf dem Lager beim Ausbau',
         value: 'arbeiten',
         emoji: '🔨'
+      },
+      {
+        label: 'Trainieren',
+        description: trainingDescription,
+        value: 'trainieren',
+        emoji: '💪'
       },
       {
         label: 'Lagerstatus',
@@ -206,8 +320,7 @@ function buildActionMenu(player) {
   return {
     content: '',
     embeds: [embed],
-    components: [new ActionRowBuilder().addComponents(menu)],
-    flags: MessageFlags.Ephemeral
+    components: [new ActionRowBuilder().addComponents(menu)]
   };
 }
 
@@ -215,6 +328,7 @@ function buildProfilePayload(player) {
   const starter = getStarter(player.pokemon_key);
   const guild = getGuild(player.guild_key);
   const cooldowns = getActionStatus(player);
+  const busy = getBusyStatus(player);
   const stats = calculateScaledStats(player.pokemon_key, player.level);
   const xpProgress = getXpProgress(player.xp);
 
@@ -236,17 +350,18 @@ function buildProfilePayload(player) {
       `**🍖 Nahrung:** ${player.food}\n` +
       `**🪨 Stein:** ${player.stone}\n` +
       `**🏗️ Lagerbeitrag:** ${player.contribution}\n\n` +
-      `**Cooldowns**\n` +
+      `**Status**\n` +
+      `${busy.label}\n` +
       `${cooldowns.sammelnLabel}\n` +
-      `${cooldowns.arbeitenLabel}`
+      `${cooldowns.arbeitenLabel}\n` +
+      `${cooldowns.trainierenLabel}`
     )
     .setColor(guild?.color ?? 0x2ecc71);
 
   return {
     content: '',
     embeds: [embed],
-    components: [buildBackRow()],
-    flags: MessageFlags.Ephemeral
+    components: [buildBackRow()]
   };
 }
 
@@ -254,29 +369,12 @@ function randomInt(min, max) {
   return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 
-function buildActionResultPayload({ title, description, color = 0x2ecc71 }) {
-  return {
-    content: '',
-    embeds: [
-      new EmbedBuilder()
-        .setTitle(title)
-        .setDescription(description)
-        .setColor(color)
-    ],
-    components: [buildBackRow()],
-    flags: MessageFlags.Ephemeral
-  };
-}
-
-function buildCooldownPayload(actionLabel, remainingMs) {
-  return buildActionResultPayload({
-    title: '⏳ Aktion noch nicht bereit',
-    description: `**${actionLabel}** ist noch auf Cooldown.\n\nBitte warte noch **${formatRemaining(remainingMs)}**.`,
-    color: 0xe74c3c
-  });
-}
-
 function runSammeln(player) {
+  const busy = getBusyStatus(player);
+  if (busy.isBusy) {
+    return buildBusyPayload(player);
+  }
+
   const remainingMs = getCooldownRemainingMs(player, 'sammeln_cooldown_until');
   if (remainingMs > 0) {
     return buildCooldownPayload('Sammeln', remainingMs);
@@ -309,6 +407,11 @@ function runSammeln(player) {
 }
 
 function runArbeiten(player) {
+  const busy = getBusyStatus(player);
+  if (busy.isBusy) {
+    return buildBusyPayload(player);
+  }
+
   const remainingMs = getCooldownRemainingMs(player, 'arbeiten_cooldown_until');
   if (remainingMs > 0) {
     return buildCooldownPayload('Arbeiten', remainingMs);
@@ -346,9 +449,50 @@ function runArbeiten(player) {
   });
 }
 
+function runTrainieren(player) {
+  const busy = getBusyStatus(player);
+  if (busy.isBusy) {
+    return buildBusyPayload(player);
+  }
+
+  const camp = getCampState().progress;
+  if (camp.level < TRAINIEREN_UNLOCK_CAMP_LEVEL) {
+    return buildLockedPayload(
+      '🔒 Training noch nicht freigeschaltet',
+      `Das Trainingsgelände wird erst ab **Camp-Stufe ${TRAINIEREN_UNLOCK_CAMP_LEVEL}** ausgebaut.\n\nAktuell ist euer Camp auf **Stufe ${camp.level}**.`
+    );
+  }
+
+  const remainingMs = getCooldownRemainingMs(player, 'trainieren_cooldown_until');
+  if (remainingMs > 0) {
+    return buildCooldownPayload('Trainieren', remainingMs);
+  }
+
+  const stats = calculateScaledStats(player.pokemon_key, player.level);
+  const statBonus = Math.floor((stats.kraft + stats.tempo + stats.instinkt) / 10);
+  const xp = randomInt(7, 10) + statBonus;
+
+  const updatedPlayer = updatePlayerProgress(player.discord_user_id, { xp });
+  const cooldownUntil = new Date(Date.now() + TRAINIEREN_COOLDOWN_MS).toISOString();
+  setActionCooldown(player.discord_user_id, 'trainieren', cooldownUntil);
+
+  const levelUpText = updatedPlayer && updatedPlayer.level > player.level
+    ? `\n\n🎉 **Levelaufstieg!** Du bist jetzt Level **${updatedPlayer.level}**.`
+    : '';
+
+  return buildActionResultPayload({
+    title: '💪 Training abgeschlossen',
+    description:
+      `Du hast konzentriert trainiert und dein Pokémon weiterentwickelt.\n\n` +
+      `+${xp} XP\n\n` +
+      `Deine Werte wachsen mit jedem Level weiter.\n` +
+      `Nächstes Training in **${formatRemaining(TRAINIEREN_COOLDOWN_MS)}**.${levelUpText}`,
+    color: 0x9b59b6
+  });
+}
+
 function buildLagerPayload() {
-  const totals = getCampTotals();
-  const camp = getCampProgress(totals.contribution);
+  const { totals, progress: camp } = getCampState();
 
   const campProgressText = camp.isMaxLevel
     ? 'Max-Stufe erreicht'
@@ -367,12 +511,15 @@ function buildLagerPayload() {
           `**🪵 Holz:** ${totals.wood}\n` +
           `**🍖 Nahrung:** ${totals.food}\n` +
           `**🪨 Stein:** ${totals.stone}\n` +
-          `**🏗️ Gesamtbeitrag:** ${totals.contribution}`
+          `**🏗️ Gesamtbeitrag:** ${totals.contribution}\n\n` +
+          `**Freischaltungen**\n` +
+          `Stufe 1: Sammeln, Arbeiten\n` +
+          `Stufe 2: Trainieren\n` +
+          `Stufe 3: Erkunden`
         )
         .setColor(0xf1c40f)
     ],
-    components: [buildBackRow()],
-    flags: MessageFlags.Ephemeral
+    components: [buildBackRow()]
   };
 }
 
@@ -456,6 +603,11 @@ module.exports = {
 
       if (value === 'arbeiten') {
         await interaction.editReply(runArbeiten(player)).catch(() => null);
+        return true;
+      }
+
+      if (value === 'trainieren') {
+        await interaction.editReply(runTrainieren(player)).catch(() => null);
         return true;
       }
 

@@ -3,8 +3,22 @@ const { calculateLevelFromXp } = require('./progressionService');
 
 const ACTION_COOLDOWN_FIELDS = {
   sammeln: 'sammeln_cooldown_until',
-  arbeiten: 'arbeiten_cooldown_until'
+  arbeiten: 'arbeiten_cooldown_until',
+  trainieren: 'trainieren_cooldown_until'
 };
+
+function ensurePlayerColumn(name, definition) {
+  const columns = db.prepare(`PRAGMA table_info(players)`).all();
+  const exists = columns.some(column => column.name === name);
+
+  if (!exists) {
+    db.prepare(`ALTER TABLE players ADD COLUMN ${name} ${definition}`).run();
+  }
+}
+
+ensurePlayerColumn('trainieren_cooldown_until', 'TEXT');
+ensurePlayerColumn('busy_until', 'TEXT');
+ensurePlayerColumn('busy_activity', 'TEXT');
 
 function getPlayerByDiscordUserId(discordUserId) {
   return db.prepare(`
@@ -142,6 +156,7 @@ function resetPlayerCooldowns(discordUserId) {
     UPDATE players
     SET sammeln_cooldown_until = NULL,
         arbeiten_cooldown_until = NULL,
+        trainieren_cooldown_until = NULL,
         updated_at = ?
     WHERE discord_user_id = ?
   `).run(new Date().toISOString(), discordUserId);
@@ -154,8 +169,33 @@ function resetAllCooldowns() {
     UPDATE players
     SET sammeln_cooldown_until = NULL,
         arbeiten_cooldown_until = NULL,
+        trainieren_cooldown_until = NULL,
         updated_at = ?
   `).run(new Date().toISOString());
+}
+
+function setBusyState(discordUserId, activityKey, untilIso) {
+  db.prepare(`
+    UPDATE players
+    SET busy_activity = ?,
+        busy_until = ?,
+        updated_at = ?
+    WHERE discord_user_id = ?
+  `).run(activityKey, untilIso, new Date().toISOString(), discordUserId);
+
+  return getPlayerByDiscordUserId(discordUserId);
+}
+
+function clearBusyState(discordUserId) {
+  db.prepare(`
+    UPDATE players
+    SET busy_activity = NULL,
+        busy_until = NULL,
+        updated_at = ?
+    WHERE discord_user_id = ?
+  `).run(new Date().toISOString(), discordUserId);
+
+  return getPlayerByDiscordUserId(discordUserId);
 }
 
 function normalizeNullableDate(value) {
@@ -242,5 +282,7 @@ module.exports = {
   resetAllCooldowns,
   updatePlayerAdmin,
   deletePlayerById,
-  deleteAllPlayers
+  deleteAllPlayers,
+  setBusyState,
+  clearBusyState,
 };
