@@ -10,12 +10,11 @@ const {
 const starters = require('../config/starters');
 const {
   getPlayerByDiscordUserId,
-  updatePlayerProgress,
   getCampTotals,
-  setActionCooldown,
-  setBusyState,
-  clearBusyState
+  setActionCooldown
 } = require('../services/playerService');
+
+const { applyProgressWithLevelUpAnnouncement } = require('../services/levelUpService');
 const {
   getXpProgress,
   getCampProgress,
@@ -468,7 +467,6 @@ function maybeResolveCompletedActivity(player) {
     })
   };
 }
-
 async function runSammeln(player, interaction) {
   const busy = getBusyStatus(player);
   if (busy.isBusy) {
@@ -485,15 +483,14 @@ async function runSammeln(player, interaction) {
   const stone = randomInt(0, 2);
   const xp = randomInt(4, 6);
 
-  const updatedPlayer = updatePlayerProgress(player.discord_user_id, { wood, food, stone, xp });
+  const result = await applyProgressWithLevelUpAnnouncement({
+    client: interaction.client,
+    discordUserId: player.discord_user_id,
+    changes: { wood, food, stone, xp }
+  });
+
   const cooldownUntil = new Date(Date.now() + SAMMELN_COOLDOWN_MS).toISOString();
   setActionCooldown(player.discord_user_id, 'sammeln', cooldownUntil);
-
-  await announceLevelUp(interaction.client, player, updatedPlayer);
-
-  const levelUpText = updatedPlayer && updatedPlayer.level > player.level
-    ? `\n\n🎉 **Levelaufstieg!** Du bist jetzt Level **${updatedPlayer.level}**.`
-    : '';
 
   return buildActionResultPayload({
     title: '🌿 Sammeln abgeschlossen',
@@ -503,7 +500,7 @@ async function runSammeln(player, interaction) {
       `+${food} Nahrung\n` +
       `+${stone} Stein\n` +
       `+${xp} XP\n\n` +
-      `Nächste Sammelaktion in **${formatRemaining(SAMMELN_COOLDOWN_MS)}**.${levelUpText}`,
+      `Nächste Sammelaktion in **${formatRemaining(SAMMELN_COOLDOWN_MS)}**.${result.levelUpText}`,
     color: 0x27ae60
   });
 }
@@ -524,21 +521,14 @@ async function runArbeiten(player, interaction) {
   const stone = randomInt(0, 1);
   const xp = randomInt(3, 5);
 
-  const updatedPlayer = updatePlayerProgress(player.discord_user_id, {
-    contribution,
-    wood,
-    stone,
-    xp
+  const result = await applyProgressWithLevelUpAnnouncement({
+    client: interaction.client,
+    discordUserId: player.discord_user_id,
+    changes: { contribution, wood, stone, xp }
   });
 
   const cooldownUntil = new Date(Date.now() + ARBEITEN_COOLDOWN_MS).toISOString();
   setActionCooldown(player.discord_user_id, 'arbeiten', cooldownUntil);
-
-  await announceLevelUp(interaction.client, player, updatedPlayer);
-
-  const levelUpText = updatedPlayer && updatedPlayer.level > player.level
-    ? `\n\n🎉 **Levelaufstieg!** Du bist jetzt Level **${updatedPlayer.level}**.`
-    : '';
 
   return buildActionResultPayload({
     title: '🔨 Arbeit im Lager erledigt',
@@ -548,7 +538,7 @@ async function runArbeiten(player, interaction) {
       `+${wood} Holz\n` +
       `+${stone} Stein\n` +
       `+${xp} XP\n\n` +
-      `Nächste Arbeitsaktion in **${formatRemaining(ARBEITEN_COOLDOWN_MS)}**.${levelUpText}`,
+      `Nächste Arbeitsaktion in **${formatRemaining(ARBEITEN_COOLDOWN_MS)}**.${result.levelUpText}`,
     color: 0xe67e22
   });
 }
@@ -576,15 +566,14 @@ async function runTrainieren(player, interaction) {
   const statBonus = Math.floor((stats.kraft + stats.tempo + stats.instinkt) / 10);
   const xp = randomInt(7, 10) + statBonus;
 
-  const updatedPlayer = updatePlayerProgress(player.discord_user_id, { xp });
+  const result = await applyProgressWithLevelUpAnnouncement({
+    client: interaction.client,
+    discordUserId: player.discord_user_id,
+    changes: { xp }
+  });
+
   const cooldownUntil = new Date(Date.now() + TRAINIEREN_COOLDOWN_MS).toISOString();
   setActionCooldown(player.discord_user_id, 'trainieren', cooldownUntil);
-
-  await announceLevelUp(interaction.client, player, updatedPlayer);
-
-  const levelUpText = updatedPlayer && updatedPlayer.level > player.level
-    ? `\n\n🎉 **Levelaufstieg!** Du bist jetzt Level **${updatedPlayer.level}**.`
-    : '';
 
   return buildActionResultPayload({
     title: '💪 Training abgeschlossen',
@@ -592,7 +581,7 @@ async function runTrainieren(player, interaction) {
       `Du hast konzentriert trainiert und dein Pokémon weiterentwickelt.\n\n` +
       `+${xp} XP\n\n` +
       `Deine Werte wachsen mit jedem Level weiter.\n` +
-      `Nächstes Training in **${formatRemaining(TRAINIEREN_COOLDOWN_MS)}**.${levelUpText}`,
+      `Nächstes Training in **${formatRemaining(TRAINIEREN_COOLDOWN_MS)}**.${result.levelUpText}`,
     color: 0x9b59b6
   });
 }
