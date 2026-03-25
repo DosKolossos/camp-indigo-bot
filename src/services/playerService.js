@@ -1,50 +1,25 @@
 const db = require('../db/database');
+const { calculateLevelFromXp } = require('./progressionService');
 
-const XP_PER_LEVEL = 20;
 const ACTION_COOLDOWN_FIELDS = {
   sammeln: 'sammeln_cooldown_until',
   arbeiten: 'arbeiten_cooldown_until'
 };
 
-function calculateLevelFromXp(xp) {
-  return Math.max(1, Math.floor(Number(xp || 0) / XP_PER_LEVEL) + 1);
-}
-
-function normalizePlayerRecord(player) {
-  if (!player) return null;
-
-  const normalizedXp = Number.isFinite(Number(player.xp)) ? Math.max(0, Number(player.xp)) : 0;
-  const expectedLevel = calculateLevelFromXp(normalizedXp);
-
-  if (player.level !== expectedLevel && player.id) {
-    db.prepare(`UPDATE players SET level = ? WHERE id = ?`).run(expectedLevel, player.id);
-  }
-
-  return {
-    ...player,
-    xp: normalizedXp,
-    level: expectedLevel
-  };
-}
-
 function getPlayerByDiscordUserId(discordUserId) {
-  const player = db.prepare(`
+  return db.prepare(`
     SELECT *
     FROM players
     WHERE discord_user_id = ?
   `).get(discordUserId);
-
-  return normalizePlayerRecord(player);
 }
 
 function getPlayerById(id) {
-  const player = db.prepare(`
+  return db.prepare(`
     SELECT *
     FROM players
     WHERE id = ?
   `).get(id);
-
-  return normalizePlayerRecord(player);
 }
 
 function createPlayer({ discordUserId, discordUsername, pokemonKey, guildKey, guildRoleId = null }) {
@@ -66,7 +41,7 @@ function createPlayer({ discordUserId, discordUsername, pokemonKey, guildKey, gu
 }
 
 function allPlayers() {
-  return db.prepare(`SELECT * FROM players ORDER BY created_at ASC`).all().map(normalizePlayerRecord);
+  return db.prepare(`SELECT * FROM players ORDER BY created_at ASC`).all();
 }
 
 function updatePlayerProgress(discordUserId, changes = {}) {
@@ -116,6 +91,7 @@ function refreshPlayerLevel(discordUserId) {
   if (!player) return null;
 
   const targetLevel = calculateLevelFromXp(player.xp);
+
   if (targetLevel !== player.level) {
     db.prepare(`
       UPDATE players
@@ -182,6 +158,13 @@ function resetAllCooldowns() {
   `).run(new Date().toISOString());
 }
 
+function normalizeNullableDate(value) {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toISOString();
+}
+
 function updatePlayerAdmin(id, payload = {}) {
   const currentPlayer = getPlayerById(id);
   if (!currentPlayer) return null;
@@ -191,7 +174,10 @@ function updatePlayerAdmin(id, payload = {}) {
     ...payload
   };
 
-  nextPlayer.xp = Number.isFinite(Number(nextPlayer.xp)) ? Math.max(0, Number(nextPlayer.xp)) : currentPlayer.xp;
+  nextPlayer.xp = Number.isFinite(Number(nextPlayer.xp))
+    ? Math.max(0, Number(nextPlayer.xp))
+    : currentPlayer.xp;
+
   nextPlayer.level = calculateLevelFromXp(nextPlayer.xp);
   nextPlayer.wood = Number.isFinite(Number(nextPlayer.wood)) ? Math.max(0, Number(nextPlayer.wood)) : currentPlayer.wood;
   nextPlayer.food = Number.isFinite(Number(nextPlayer.food)) ? Math.max(0, Number(nextPlayer.food)) : currentPlayer.food;
@@ -234,13 +220,6 @@ function updatePlayerAdmin(id, payload = {}) {
   return getPlayerById(id);
 }
 
-function normalizeNullableDate(value) {
-  if (!value) return null;
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return null;
-  return date.toISOString();
-}
-
 function deletePlayerById(id) {
   return db.prepare(`DELETE FROM players WHERE id = ?`).run(id);
 }
@@ -250,9 +229,7 @@ function deleteAllPlayers() {
 }
 
 module.exports = {
-  XP_PER_LEVEL,
   ACTION_COOLDOWN_FIELDS,
-  calculateLevelFromXp,
   getPlayerByDiscordUserId,
   getPlayerById,
   createPlayer,

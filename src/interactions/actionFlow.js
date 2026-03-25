@@ -10,12 +10,17 @@ const {
 const starters = require('../config/starters');
 const guilds = require('../config/guilds');
 const {
-  XP_PER_LEVEL,
   getPlayerByDiscordUserId,
   updatePlayerProgress,
   getCampTotals,
   setActionCooldown
 } = require('../services/playerService');
+
+const {
+  getXpProgress,
+  getCampProgress,
+  calculateScaledStats
+} = require('../services/progressionService');
 
 const SAMMELN_COOLDOWN_MS = parseDurationMs(process.env.SAMMELN_COOLDOWN_MINUTES, 10 * 60 * 1000, 60 * 1000);
 const ARBEITEN_COOLDOWN_MS = parseDurationMs(process.env.ARBEITEN_COOLDOWN_MINUTES, 8 * 60 * 1000, 60 * 1000);
@@ -92,6 +97,26 @@ function getXpProgress(player) {
   };
 }
 
+function getXpProgressText(player) {
+  const progress = getXpProgress(player.xp);
+
+  if (progress.isMaxLevel) {
+    return 'Max-Level erreicht';
+  }
+
+  return `${progress.currentXpInLevel}/${progress.neededForNextLevel} XP bis Level ${progress.nextLevel}`;
+}
+
+function buildStatsText(stats) {
+  return (
+    `**Kraft:** ${stats.kraft}\n` +
+    `**Tempo:** ${stats.tempo}\n` +
+    `**Ausdauer:** ${stats.ausdauer}\n` +
+    `**Instinkt:** ${stats.instinkt}\n` +
+    `**Geschick:** ${stats.geschick}`
+  );
+}
+
 function buildBackRow() {
   return new ActionRowBuilder().addComponents(
     new ButtonBuilder()
@@ -142,7 +167,16 @@ function buildActionMenu(player) {
 
   const embed = new EmbedBuilder()
     .setTitle('🎮 Deine Aktionen')
-    .setDescription(text)
+    .setDescription(
+      `**Pokémon:** ${starter?.name ?? player.pokemon_key} ${starter?.emoji ?? ''}\n` +
+      `**Gilde:** ${guild?.name ?? player.guild_key} ${guild?.emoji ?? ''}\n` +
+      `**Level:** ${player.level}\n` +
+      `**Fortschritt:** ${getXpProgressText(player)}\n\n` +
+      `**Status**\n` +
+      `${cooldowns.sammelnLabel}\n` +
+      `${cooldowns.arbeitenLabel}\n\n` +
+      'Wähle deine nächste Aktion.'
+    )
     .addFields(
       {
         name: 'Fortschritt',
@@ -155,7 +189,7 @@ function buildActionMenu(player) {
         inline: false
       }
     )
-    .setFooter({ text: 'Wähle deine nächste Aktion.' + `*Falls dieses Menü später nicht mehr reagiert, öffne es erneut über die feste Nachricht im Channel.*`})
+    .setFooter({ text: 'Wähle deine nächste Aktion.' + `*Falls dieses Menü später nicht mehr reagiert, öffne es erneut über die feste Nachricht im Channel.*` })
     .setColor(guild?.color ?? 0x5865f2);
 
   const menu = new StringSelectMenuBuilder()
@@ -201,29 +235,33 @@ function buildActionMenu(player) {
 }
 
 function buildProfilePayload(player) {
-  const { guild, text } = getPlayerHeadline(player);
-  const progress = getXpProgress(player);
+  const starter = getStarter(player.pokemon_key);
+  const guild = getGuild(player.guild_key);
   const cooldowns = getActionStatus(player);
+  const stats = calculateScaledStats(player.pokemon_key, player.level);
+  const xpProgress = getXpProgress(player.xp);
+
+  const progressText = xpProgress.isMaxLevel
+    ? 'Max-Level erreicht'
+    : `${xpProgress.currentXpInLevel}/${xpProgress.neededForNextLevel} XP bis Level ${xpProgress.nextLevel}`;
 
   const embed = new EmbedBuilder()
     .setTitle(`📜 Profil von ${player.discord_username}`)
-    .setDescription(text)
-    .addFields(
-      {
-        name: 'Fortschritt',
-        value: `Level **${player.level}**\nGesamt-XP: **${player.xp}**\n${progress.text}`,
-        inline: false
-      },
-      {
-        name: 'Ressourcen',
-        value: `🪵 Holz: **${player.wood}**\n🍖 Nahrung: **${player.food}**\n🪨 Stein: **${player.stone}**\n🏗️ Lagerbeitrag: **${player.contribution}**`,
-        inline: false
-      },
-      {
-        name: 'Cooldowns',
-        value: `${cooldowns.sammelnLabel}\n${cooldowns.arbeitenLabel}`,
-        inline: false
-      }
+    .setDescription(
+      `**Pokémon:** ${starter?.name ?? player.pokemon_key} ${starter?.emoji ?? ''}\n` +
+      `**Gilde:** ${guild?.name ?? player.guild_key} ${guild?.emoji ?? ''}\n\n` +
+      `**Level:** ${player.level}\n` +
+      `**XP gesamt:** ${player.xp}\n` +
+      `**Fortschritt:** ${progressText}\n\n` +
+      `**Aktuelle Werte**\n` +
+      `${buildStatsText(stats)}\n\n` +
+      `**🪵 Holz:** ${player.wood}\n` +
+      `**🍖 Nahrung:** ${player.food}\n` +
+      `**🪨 Stein:** ${player.stone}\n` +
+      `**🏗️ Lagerbeitrag:** ${player.contribution}\n\n` +
+      `**Cooldowns**\n` +
+      `${cooldowns.sammelnLabel}\n` +
+      `${cooldowns.arbeitenLabel}`
     )
     .setColor(guild?.color ?? 0x2ecc71);
 
@@ -333,23 +371,26 @@ function runArbeiten(player) {
 
 function buildLagerPayload() {
   const totals = getCampTotals();
+  const camp = getCampProgress(totals.contribution);
+
+  const campProgressText = camp.isMaxLevel
+    ? 'Max-Stufe erreicht'
+    : `${camp.currentInLevel}/${camp.neededForNextLevel} Beitrag bis Stufe ${camp.nextLevel}`;
 
   return {
     content: '',
     embeds: [
       new EmbedBuilder()
         .setTitle('🏕️ Lagerstatus')
-        .addFields(
-          {
-            name: 'Camp',
-            value: `Abenteurer: **${totals.players}**\nGesamt-XP: **${totals.xp}**`,
-            inline: false
-          },
-          {
-            name: 'Ressourcen',
-            value: `🪵 Holz: **${totals.wood}**\n🍖 Nahrung: **${totals.food}**\n🪨 Stein: **${totals.stone}**\n🏗️ Gesamtbeitrag: **${totals.contribution}**`,
-            inline: false
-          }
+        .setDescription(
+          `**Camp-Stufe:** ${camp.level}\n` +
+          `**Camp-Fortschritt:** ${campProgressText}\n\n` +
+          `**Abenteurer:** ${totals.players}\n` +
+          `**Gesamt-XP:** ${totals.xp}\n\n` +
+          `**🪵 Holz:** ${totals.wood}\n` +
+          `**🍖 Nahrung:** ${totals.food}\n` +
+          `**🪨 Stein:** ${totals.stone}\n` +
+          `**🏗️ Gesamtbeitrag:** ${totals.contribution}`
         )
         .setColor(0xf1c40f)
     ],
@@ -414,51 +455,51 @@ module.exports = {
       }
     }
 
-if (interaction.isStringSelectMenu() && interaction.customId === 'camp:actions:menu') {
-  const ok = await safeDeferUpdate(interaction);
-  if (!ok) return false;
+    if (interaction.isStringSelectMenu() && interaction.customId === 'camp:actions:menu') {
+      const ok = await safeDeferUpdate(interaction);
+      if (!ok) return false;
 
-  const player = getPlayerByDiscordUserId(interaction.user.id);
+      const player = getPlayerByDiscordUserId(interaction.user.id);
 
-  if (!player) {
-    await interaction.editReply({
-      content: 'Du hast noch kein Abenteuer begonnen. Öffne das Menü bitte erneut über die feste Aktionsnachricht.',
-      embeds: [],
-      components: []
-    }).catch(() => null);
-    return true;
-  }
+      if (!player) {
+        await interaction.editReply({
+          content: 'Du hast noch kein Abenteuer begonnen. Öffne das Menü bitte erneut über die feste Aktionsnachricht.',
+          embeds: [],
+          components: []
+        }).catch(() => null);
+        return true;
+      }
 
-  const value = interaction.values[0];
+      const value = interaction.values[0];
 
-  if (value === 'profil') {
-    await interaction.editReply(buildProfilePayload(player)).catch(() => null);
-    return true;
-  }
+      if (value === 'profil') {
+        await interaction.editReply(buildProfilePayload(player)).catch(() => null);
+        return true;
+      }
 
-  if (value === 'sammeln') {
-    await interaction.editReply(runSammeln(player)).catch(() => null);
-    return true;
-  }
+      if (value === 'sammeln') {
+        await interaction.editReply(runSammeln(player)).catch(() => null);
+        return true;
+      }
 
-  if (value === 'arbeiten') {
-    await interaction.editReply(runArbeiten(player)).catch(() => null);
-    return true;
-  }
+      if (value === 'arbeiten') {
+        await interaction.editReply(runArbeiten(player)).catch(() => null);
+        return true;
+      }
 
-  if (value === 'lager') {
-    await interaction.editReply(buildLagerPayload()).catch(() => null);
-    return true;
-  }
+      if (value === 'lager') {
+        await interaction.editReply(buildLagerPayload()).catch(() => null);
+        return true;
+      }
 
-  await interaction.editReply({
-    content: 'Unbekannte Aktion. Öffne das Menü bitte erneut.',
-    embeds: [],
-    components: []
-  }).catch(() => null);
+      await interaction.editReply({
+        content: 'Unbekannte Aktion. Öffne das Menü bitte erneut.',
+        embeds: [],
+        components: []
+      }).catch(() => null);
 
-  return true;
-}
+      return true;
+    }
 
     return false;
   }
