@@ -12,11 +12,10 @@ const {
 const pingCommand = require('./commands/ping');
 const setupStartCommand = require('./commands/setup-start');
 const setupActionsCommand = require('./commands/setup-actions');
-const setupCampCommand = require('./commands/setup-camp');
 const startFlow = require('./interactions/startFlow');
 const actionFlow = require('./interactions/actionFlow');
-const { syncCampStatusMessage } = require('./services/campStatusService');
 const { startAdminServer } = require('./web/adminServer');
+const { sendBotLog } = require('./services/botLogService');
 
 function envFlag(name, fallback = false) {
   const value = String(process.env[name] ?? fallback).toLowerCase().trim();
@@ -58,14 +57,12 @@ if (!ENABLE_DISCORD_BOT) {
   client.commands.set(pingCommand.data.name, pingCommand);
   client.commands.set(setupStartCommand.data.name, setupStartCommand);
   client.commands.set(setupActionsCommand.data.name, setupActionsCommand);
-  client.commands.set(setupCampCommand.data.name, setupCampCommand);
 
   async function registerCommands() {
     const commands = [
       pingCommand.data.toJSON(),
       setupStartCommand.data.toJSON(),
-      setupActionsCommand.data.toJSON(),
-      setupCampCommand.data.toJSON()
+      setupActionsCommand.data.toJSON()
     ];
 
     const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
@@ -84,7 +81,12 @@ if (!ENABLE_DISCORD_BOT) {
   client.once('clientReady', async () => {
     console.log(`Eingeloggt als ${client.user.tag}`);
     await registerCommands();
-    await syncCampStatusMessage(client);
+
+    await sendBotLog(
+      client,
+      `Bot online als **${client.user.tag}**. Start-, Aktions- und Gildenkanäle sind aktiv.`,
+      { level: 'info' }
+    );
   });
 
   client.on('interactionCreate', async interaction => {
@@ -125,6 +127,11 @@ if (!ENABLE_DISCORD_BOT) {
       }
 
       console.error(error);
+      await sendBotLog(
+        client,
+        `Interaction-Fehler: **${interaction.customId || interaction.commandName || 'unbekannt'}** → ${String(error?.message || error).slice(0, 1200)}`,
+        { level: 'error' }
+      );
 
       const payload = {
         content: 'Beim Ausführen der Aktion ist ein Fehler aufgetreten.',

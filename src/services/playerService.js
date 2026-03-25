@@ -157,8 +157,6 @@ function resetPlayerCooldowns(discordUserId) {
     SET sammeln_cooldown_until = NULL,
         arbeiten_cooldown_until = NULL,
         trainieren_cooldown_until = NULL,
-        busy_until = NULL,
-        busy_activity = NULL,
         updated_at = ?
     WHERE discord_user_id = ?
   `).run(new Date().toISOString(), discordUserId);
@@ -172,8 +170,6 @@ function resetAllCooldowns() {
     SET sammeln_cooldown_until = NULL,
         arbeiten_cooldown_until = NULL,
         trainieren_cooldown_until = NULL,
-        busy_until = NULL,
-        busy_activity = NULL,
         updated_at = ?
   `).run(new Date().toISOString());
 }
@@ -243,9 +239,6 @@ function updatePlayerAdmin(id, payload = {}) {
         contribution = ?,
         sammeln_cooldown_until = ?,
         arbeiten_cooldown_until = ?,
-        trainieren_cooldown_until = ?,
-        busy_until = ?,
-        busy_activity = ?,
         updated_at = ?
     WHERE id = ?
   `).run(
@@ -260,9 +253,6 @@ function updatePlayerAdmin(id, payload = {}) {
     nextPlayer.contribution,
     normalizeNullableDate(nextPlayer.sammeln_cooldown_until),
     normalizeNullableDate(nextPlayer.arbeiten_cooldown_until),
-    normalizeNullableDate(nextPlayer.trainieren_cooldown_until),
-    normalizeNullableDate(nextPlayer.busy_until),
-    nextPlayer.busy_activity ? String(nextPlayer.busy_activity) : null,
     now,
     id
   );

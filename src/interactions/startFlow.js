@@ -8,31 +8,22 @@ const {
 } = require('discord.js');
 
 const starters = require('../config/starters');
+const guilds = require('../config/guilds');
 const {
   getPlayerByDiscordUserId,
   createPlayer
 } = require('../services/playerService');
 const { ensureGuildRole } = require('../services/guildRoleService');
-const { getGuilds, getGuildByKey } = require('../services/guildService');
-const { syncCampStatusMessage } = require('../services/campStatusService');
+const { buildWelcomeMessage } = require('../services/messages');
+const { fetchGuildChatChannel } = require('../services/channelService');
+const { sendBotLog } = require('../services/botLogService');
 
 function getStarter(key) {
   return starters.find(starter => starter.key === key) || starters[0];
 }
 
-function getFirstGuild() {
-  return getGuilds()[0] || {
-    key: 'default',
-    name: 'Camp Indigo',
-    emoji: '🏳️',
-    description: 'Standardgilde',
-    color: 0x5865f2,
-    roleName: 'Camp Indigo'
-  };
-}
-
 function getGuild(key) {
-  return getGuildByKey(key) || getFirstGuild();
+  return guilds.find(guild => guild.key === key) || guilds[0];
 }
 
 function buildStatsText(stats) {
@@ -107,7 +98,6 @@ function buildStarterPayload(selectedKey) {
 
 function buildGuildPayload(starterKey, guildKey) {
   const starter = getStarter(starterKey);
-  const guilds = getGuilds();
   const guild = getGuild(guildKey);
 
   const embed = new EmbedBuilder()
@@ -126,7 +116,7 @@ function buildGuildPayload(starterKey, guildKey) {
     .addOptions(
       guilds.map(item => ({
         label: item.name,
-        description: item.description.slice(0, 100) || 'Keine Beschreibung hinterlegt',
+        description: item.description.slice(0, 100),
         value: item.key,
         default: item.key === guild.key
       }))
@@ -147,18 +137,9 @@ function buildGuildPayload(starterKey, guildKey) {
   };
 }
 
-function buildWelcomeMessage(username, starter, guild) {
-  const variants = [
-    `🎉 **@${username}** ist dem Lager beigetreten!\nPartner-Pokémon: **${starter.name}**\nGilde: **${guild.name}** ${guild.emoji}`,
-    `🏕️ Ein neues Pokémon ist angekommen!\n**@${username}** startet als **${starter.name}** bei **${guild.name}** ${guild.emoji}.`,
-    `✨ Das Lager wächst weiter: **@${username}** hat sich **${guild.name}** angeschlossen.\nGewähltes Pokémon: **${starter.name}**`
-  ];
-  return variants[Math.floor(Math.random() * variants.length)];
-}
-
 async function assignGuildRole(interaction, guildConfig) {
   const member = await interaction.guild.members.fetch(interaction.user.id);
-  const rolesToRemove = getGuilds()
+  const rolesToRemove = guilds
     .map(item => interaction.guild.roles.cache.find(role => role.name === item.roleName))
     .filter(Boolean);
 
@@ -189,7 +170,7 @@ module.exports = {
 
       if (interaction.customId.startsWith('camp:starter:confirm:')) {
         const starterKey = interaction.customId.split(':')[3];
-        return interaction.update(buildGuildPayload(starterKey, getFirstGuild().key));
+        return interaction.update(buildGuildPayload(starterKey, guilds[0].key));
       }
 
       if (interaction.customId.startsWith('camp:guild:confirm:')) {
@@ -203,7 +184,7 @@ module.exports = {
         const guild = getGuild(guildKey);
         const role = await assignGuildRole(interaction, guild);
 
-        createPlayer({
+        const player = createPlayer({
           discordUserId: interaction.user.id,
           discordUsername: interaction.user.globalName || interaction.user.username,
           pokemonKey: starter.key,
@@ -211,28 +192,23 @@ module.exports = {
           guildRoleId: role?.id ?? null
         });
 
-        const chatChannelId = process.env.CHAT_CHANNEL_ID;
-
-        if (!chatChannelId) {
-          console.warn('CHAT_CHANNEL_ID ist nicht gesetzt.');
+        const chatChannel = await fetchGuildChatChannel(interaction.client, guild.key).catch(() => null);
+        if (chatChannel) {
+          await chatChannel.send({ content: buildWelcomeMessage(player) }).catch(() => null);
         } else {
-          const chatChannel = await interaction.client.channels.fetch(chatChannelId).catch(error => {
-            console.error('CHAT_CHANNEL_ID konnte nicht geladen werden:', chatChannelId, error);
-            return null;
-          });
-
-          if (!chatChannel) {
-            console.warn(`Chat-Channel nicht gefunden: ${chatChannelId}`);
-          } else if (!chatChannel.isTextBased()) {
-            console.warn(`Channel ist nicht textbasiert: ${chatChannelId}`);
-          } else {
-            await chatChannel.send(
-              buildWelcomeMessage(interaction.user.globalName || interaction.user.username, starter, guild)
-            );
-          }
+          console.warn(`Kein Gilden-Chat für ${guild.key} gefunden.`);
+          await sendBotLog(
+            interaction.client,
+            `Kein Chatkanal für Gilde **${guild.name}** gefunden. Bitte ENV prüfen.`,
+            { level: 'warn' }
+          );
         }
 
-        await syncCampStatusMessage(interaction.client);
+        await sendBotLog(
+          interaction.client,
+          `Neuer Abenteuerstart: **${player.discord_username}** → **${starter.name}** bei **${guild.name}**.`,
+          { level: 'info' }
+        );
 
         return interaction.update({
           content:

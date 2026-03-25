@@ -1,17 +1,7 @@
-const fs = require('fs');
 const path = require('path');
 const Database = require('better-sqlite3');
 
-const dataDir =
-  process.env.DB_DIR ||
-  process.env.RAILWAY_VOLUME_MOUNT_PATH ||
-  '/data';
-
-fs.mkdirSync(dataDir, { recursive: true });
-
-const dbPath = process.env.DB_PATH || path.join(dataDir, 'camp_indigo.db');
-console.log(`[db] using sqlite file: ${dbPath}`);
-
+const dbPath = path.join(process.cwd(), 'camp_indigo.db');
 const db = new Database(dbPath);
 db.pragma('journal_mode = WAL');
 db.pragma('foreign_keys = ON');

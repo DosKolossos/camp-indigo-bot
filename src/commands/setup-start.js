@@ -53,33 +53,6 @@ async function findExistingStartMessage(client) {
   return { channel, message };
 }
 
-
-async function findPanelMessageByScan(channel) {
-  if (!channel || !channel.isTextBased() || !channel.messages?.fetch) {
-    return null;
-  }
-
-  const recentMessages = await channel.messages.fetch({ limit: 50 }).catch(() => null);
-  if (!recentMessages) {
-    return null;
-  }
-
-  for (const message of recentMessages.values()) {
-    const firstEmbed = message.embeds?.[0];
-    const button = message.components?.[0]?.components?.[0];
-
-    if (
-      message.author?.id === channel.client.user?.id &&
-      firstEmbed?.title === '🏕️ Willkommen in Camp Indigo' &&
-      button?.customId === 'camp:start'
-    ) {
-      return { channel, message };
-    }
-  }
-
-  return null;
-}
-
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('setup-start')
@@ -105,9 +78,7 @@ module.exports = {
     }
 
     const payload = buildStartMessage();
-    const existing =
-      await findExistingStartMessage(interaction.client) ||
-      await findPanelMessageByScan(targetChannel);
+    const existing = await findExistingStartMessage(interaction.client);
 
     let finalMessage;
     let infoText;

@@ -1,5 +1,6 @@
 const { getPlayerByDiscordUserId, updatePlayerProgress } = require('./playerService');
 const { buildLevelUpMessage } = require('./messages');
+const { fetchGuildChatChannel } = require('./channelService');
 
 function getActionLevelUpText(previousPlayer, updatedPlayer) {
   if (!previousPlayer || !updatedPlayer) {
@@ -13,7 +14,7 @@ function getActionLevelUpText(previousPlayer, updatedPlayer) {
   return `\n\n🎉 **Levelaufstieg!** Du bist jetzt Level **${updatedPlayer.level}**.`;
 }
 
-async function postLevelUpToChat(client, previousPlayer, updatedPlayer) {
+async function postLevelUpToGuildChat(client, previousPlayer, updatedPlayer) {
   if (!client || !previousPlayer || !updatedPlayer) {
     return;
   }
@@ -22,27 +23,17 @@ async function postLevelUpToChat(client, previousPlayer, updatedPlayer) {
     return;
   }
 
-  const chatChannelId = process.env.CHAT_CHANNEL_ID;
-  if (!chatChannelId) {
-    return;
-  }
-
   const content = buildLevelUpMessage(updatedPlayer, previousPlayer.level);
   if (!content) {
     return;
   }
 
-  try {
-    const channel = await client.channels.fetch(chatChannelId).catch(() => null);
-
-    if (!channel || !channel.isTextBased()) {
-      return;
-    }
-
-    await channel.send({ content }).catch(() => null);
-  } catch (error) {
-    console.error('Levelaufstieg konnte nicht im Chat gepostet werden:', error);
+  const channel = await fetchGuildChatChannel(client, updatedPlayer.guild_key).catch(() => null);
+  if (!channel) {
+    return;
   }
+
+  await channel.send({ content }).catch(() => null);
 }
 
 async function applyProgressWithLevelUpAnnouncement({ client, discordUserId, changes }) {
@@ -58,7 +49,7 @@ async function applyProgressWithLevelUpAnnouncement({ client, discordUserId, cha
 
   const updatedPlayer = updatePlayerProgress(discordUserId, changes);
 
-  await postLevelUpToChat(client, previousPlayer, updatedPlayer);
+  await postLevelUpToGuildChat(client, previousPlayer, updatedPlayer);
 
   return {
     previousPlayer,
@@ -70,6 +61,6 @@ async function applyProgressWithLevelUpAnnouncement({ client, discordUserId, cha
 
 module.exports = {
   applyProgressWithLevelUpAnnouncement,
-  postLevelUpToChat,
+  postLevelUpToGuildChat,
   getActionLevelUpText
 };
