@@ -25,6 +25,14 @@ const {
 const SAMMELN_COOLDOWN_MS = parseDurationMs(process.env.SAMMELN_COOLDOWN_MINUTES, 10 * 60 * 1000, 60 * 1000);
 const ARBEITEN_COOLDOWN_MS = parseDurationMs(process.env.ARBEITEN_COOLDOWN_MINUTES, 8 * 60 * 1000, 60 * 1000);
 
+function parseDurationMs(envValue, fallback, multiplier = 1) {
+  const numericValue = Number(envValue);
+  if (!Number.isFinite(numericValue) || numericValue < 0) {
+    return fallback;
+  }
+  return numericValue * multiplier;
+}
+
 function getInteractionErrorCode(error) {
   return error?.code ?? error?.rawError?.code ?? error?.data?.code ?? null;
 }
@@ -56,14 +64,6 @@ async function safeDeferUpdate(interaction) {
     }
     throw error;
   }
-}
-
-function parseDurationMs(envValue, fallback, multiplier = 1) {
-  const numericValue = Number(envValue);
-  if (!Number.isFinite(numericValue) || numericValue < 0) {
-    return fallback;
-  }
-  return numericValue * multiplier;
 }
 
 function getStarter(key) {
@@ -149,8 +149,7 @@ function getActionStatus(player) {
 }
 
 function buildActionMenu(player) {
-  const { starter, guild, text } = getPlayerHeadline(player);
-  const progress = getXpProgress(player.xp);
+  const { starter, guild } = getPlayerHeadline(player);
   const cooldowns = getActionStatus(player);
 
   const embed = new EmbedBuilder()
@@ -165,19 +164,9 @@ function buildActionMenu(player) {
       `${cooldowns.arbeitenLabel}\n\n` +
       'Wähle deine nächste Aktion.'
     )
-    .addFields(
-      {
-        name: 'Fortschritt',
-        value: `Level **${player.level}**\n${getXpProgressText(player)}`,
-        inline: false
-      },
-      {
-        name: 'Bereit',
-        value: `${cooldowns.sammelnLabel}\n${cooldowns.arbeitenLabel}`,
-        inline: false
-      }
-    )
-    .setFooter({ text: 'Wähle deine nächste Aktion.' + `*Falls dieses Menü später nicht mehr reagiert, öffne es erneut über die feste Nachricht im Channel.*` })
+    .setFooter({
+      text: 'Falls dieses Menü später nicht mehr reagiert, öffne es erneut über die feste Aktionsnachricht.'
+    })
     .setColor(guild?.color ?? 0x5865f2);
 
   const menu = new StringSelectMenuBuilder()
@@ -387,14 +376,6 @@ function buildLagerPayload() {
   };
 }
 
-function buildMissingPlayerPayload() {
-  return {
-    content: 'Du hast noch kein Abenteuer begonnen. Nutze zuerst die Startnachricht.',
-    components: [],
-    flags: MessageFlags.Ephemeral
-  };
-}
-
 module.exports = {
   canHandleInteraction(interaction) {
     return Boolean(
@@ -408,39 +389,42 @@ module.exports = {
   },
 
   async handleInteraction(interaction) {
-    const player = getPlayerByDiscordUserId(interaction.user.id);
+    if (interaction.isButton() && interaction.customId === 'camp:actions:open') {
+      const ok = await safeDeferReply(interaction);
+      if (!ok) return false;
 
-    if (!player) {
-      const payload = buildMissingPlayerPayload();
-      if (interaction.isButton()) {
-        return interaction.reply(payload);
-      }
-      return interaction.update(payload);
-    }
+      const player = getPlayerByDiscordUserId(interaction.user.id);
 
-    if (interaction.isButton()) {
-      if (interaction.isButton() && interaction.customId === 'camp:actions:open') {
-        const ok = await safeDeferReply(interaction);
-        if (!ok) return false;
-
-        const player = getPlayerByDiscordUserId(interaction.user.id);
-
-        if (!player) {
-          await interaction.editReply({
-            content: 'Du hast noch kein Abenteuer begonnen. Nutze zuerst die Startnachricht.',
-            embeds: [],
-            components: []
-          }).catch(() => null);
-          return true;
-        }
-
-        await interaction.editReply(buildActionMenu(player)).catch(() => null);
+      if (!player) {
+        await interaction.editReply({
+          content: 'Du hast noch kein Abenteuer begonnen. Nutze zuerst die Startnachricht.',
+          embeds: [],
+          components: []
+        }).catch(() => null);
         return true;
       }
 
-      if (interaction.customId === 'camp:actions:back') {
-        return interaction.update(buildActionMenu(getPlayerByDiscordUserId(interaction.user.id)));
+      await interaction.editReply(buildActionMenu(player)).catch(() => null);
+      return true;
+    }
+
+    if (interaction.isButton() && interaction.customId === 'camp:actions:back') {
+      const ok = await safeDeferUpdate(interaction);
+      if (!ok) return false;
+
+      const player = getPlayerByDiscordUserId(interaction.user.id);
+
+      if (!player) {
+        await interaction.editReply({
+          content: 'Du hast noch kein Abenteuer begonnen. Öffne das Menü bitte erneut über die feste Aktionsnachricht.',
+          embeds: [],
+          components: []
+        }).catch(() => null);
+        return true;
       }
+
+      await interaction.editReply(buildActionMenu(player)).catch(() => null);
+      return true;
     }
 
     if (interaction.isStringSelectMenu() && interaction.customId === 'camp:actions:menu') {
