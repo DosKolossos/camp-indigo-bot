@@ -14,6 +14,7 @@ const {
 } = require('../services/playerService');
 const { ensureGuildRole } = require('../services/guildRoleService');
 const { getGuilds, getGuildByKey } = require('../services/guildService');
+const { syncCampStatusMessage } = require('../services/campStatusService');
 
 function getStarter(key) {
   return starters.find(starter => starter.key === key) || starters[0];
@@ -230,6 +231,8 @@ module.exports = {
             );
           }
         }
+
+        await syncCampStatusMessage(interaction.client);
 
         return interaction.update({
           content:

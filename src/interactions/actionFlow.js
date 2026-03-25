@@ -22,6 +22,7 @@ const {
   calculateScaledStats
 } = require('../services/progressionService');
 const { getGuildByKey } = require('../services/guildService');
+const { syncCampStatusMessage } = require('../services/campStatusService');
 
 const SAMMELN_COOLDOWN_MS = parseDurationMs(process.env.SAMMELN_COOLDOWN_MINUTES, 10 * 60 * 1000, 60 * 1000);
 const ARBEITEN_COOLDOWN_MS = parseDurationMs(process.env.ARBEITEN_COOLDOWN_MINUTES, 8 * 60 * 1000, 60 * 1000);
@@ -663,7 +664,12 @@ module.exports = {
         return true;
       }
 
-      await interaction.editReply(completionPayload || buildActionMenu(player)).catch(() => null);
+      if (completionPayload) {
+        await interaction.editReply(completionPayload).catch(() => null);
+        await syncCampStatusMessage(interaction.client);
+      } else {
+        await interaction.editReply(buildActionMenu(player)).catch(() => null);
+      }
       return true;
     }
 
@@ -682,7 +688,12 @@ module.exports = {
         return true;
       }
 
-      await interaction.editReply(completionPayload || buildActionMenu(player)).catch(() => null);
+      if (completionPayload) {
+        await interaction.editReply(completionPayload).catch(() => null);
+        await syncCampStatusMessage(interaction.client);
+      } else {
+        await interaction.editReply(buildActionMenu(player)).catch(() => null);
+      }
       return true;
     }
 
@@ -703,6 +714,7 @@ module.exports = {
 
       if (completionPayload) {
         await interaction.editReply(completionPayload).catch(() => null);
+        await syncCampStatusMessage(interaction.client);
         return true;
       }
 
@@ -715,16 +727,19 @@ module.exports = {
 
       if (value === 'sammeln') {
         await interaction.editReply(runSammeln(player)).catch(() => null);
+        await syncCampStatusMessage(interaction.client);
         return true;
       }
 
       if (value === 'arbeiten') {
         await interaction.editReply(runArbeiten(player)).catch(() => null);
+        await syncCampStatusMessage(interaction.client);
         return true;
       }
 
       if (value === 'trainieren') {
         await interaction.editReply(runTrainieren(player)).catch(() => null);
+        await syncCampStatusMessage(interaction.client);
         return true;
       }
 
