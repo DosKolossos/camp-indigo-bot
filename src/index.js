@@ -103,6 +103,22 @@ if (!ENABLE_DISCORD_BOT) {
         }
       }
     } catch (error) {
+      const errorCode =
+        error?.code ??
+        error?.rawError?.code ??
+        error?.data?.code ??
+        null;
+
+      if (errorCode === 10062) {
+        console.warn('Interaction war bereits abgelaufen oder wurde schon beantwortet (10062).');
+        return;
+      }
+
+      if (errorCode === 40060) {
+        console.warn('Interaction wurde bereits beantwortet (40060).');
+        return;
+      }
+
       console.error(error);
 
       const payload = {

@@ -20,6 +20,39 @@ const {
 const SAMMELN_COOLDOWN_MS = parseDurationMs(process.env.SAMMELN_COOLDOWN_MINUTES, 10 * 60 * 1000, 60 * 1000);
 const ARBEITEN_COOLDOWN_MS = parseDurationMs(process.env.ARBEITEN_COOLDOWN_MINUTES, 8 * 60 * 1000, 60 * 1000);
 
+function getInteractionErrorCode(error) {
+  return error?.code ?? error?.rawError?.code ?? error?.data?.code ?? null;
+}
+
+function isExpiredInteractionError(error) {
+  const code = getInteractionErrorCode(error);
+  return code === 10062 || code === 40060;
+}
+
+async function safeDeferReply(interaction) {
+  try {
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    return true;
+  } catch (error) {
+    if (isExpiredInteractionError(error)) {
+      return false;
+    }
+    throw error;
+  }
+}
+
+async function safeDeferUpdate(interaction) {
+  try {
+    await interaction.deferUpdate();
+    return true;
+  } catch (error) {
+    if (isExpiredInteractionError(error)) {
+      return false;
+    }
+    throw error;
+  }
+}
+
 function parseDurationMs(envValue, fallback, multiplier = 1) {
   const numericValue = Number(envValue);
   if (!Number.isFinite(numericValue) || numericValue < 0) {
@@ -122,7 +155,7 @@ function buildActionMenu(player) {
         inline: false
       }
     )
-    .setFooter({ text: 'Wähle deine nächste Aktion.' })
+    .setFooter({ text: 'Wähle deine nächste Aktion.' + `*Falls dieses Menü später nicht mehr reagiert, öffne es erneut über die feste Nachricht im Channel.*`})
     .setColor(guild?.color ?? 0x5865f2);
 
   const menu = new StringSelectMenuBuilder()
@@ -357,8 +390,23 @@ module.exports = {
     }
 
     if (interaction.isButton()) {
-      if (interaction.customId === 'camp:actions:open') {
-        return interaction.reply(buildActionMenu(player));
+      if (interaction.isButton() && interaction.customId === 'camp:actions:open') {
+        const ok = await safeDeferReply(interaction);
+        if (!ok) return false;
+
+        const player = getPlayerByDiscordUserId(interaction.user.id);
+
+        if (!player) {
+          await interaction.editReply({
+            content: 'Du hast noch kein Abenteuer begonnen. Nutze zuerst die Startnachricht.',
+            embeds: [],
+            components: []
+          }).catch(() => null);
+          return true;
+        }
+
+        await interaction.editReply(buildActionMenu(player)).catch(() => null);
+        return true;
       }
 
       if (interaction.customId === 'camp:actions:back') {
@@ -366,26 +414,51 @@ module.exports = {
       }
     }
 
-    if (interaction.isStringSelectMenu() && interaction.customId === 'camp:actions:menu') {
-      const action = interaction.values[0];
-      const freshPlayer = getPlayerByDiscordUserId(interaction.user.id);
+if (interaction.isStringSelectMenu() && interaction.customId === 'camp:actions:menu') {
+  const ok = await safeDeferUpdate(interaction);
+  if (!ok) return false;
 
-      if (action === 'profil') {
-        return interaction.update(buildProfilePayload(freshPlayer));
-      }
+  const player = getPlayerByDiscordUserId(interaction.user.id);
 
-      if (action === 'sammeln') {
-        return interaction.update(runSammeln(freshPlayer));
-      }
+  if (!player) {
+    await interaction.editReply({
+      content: 'Du hast noch kein Abenteuer begonnen. Öffne das Menü bitte erneut über die feste Aktionsnachricht.',
+      embeds: [],
+      components: []
+    }).catch(() => null);
+    return true;
+  }
 
-      if (action === 'arbeiten') {
-        return interaction.update(runArbeiten(freshPlayer));
-      }
+  const value = interaction.values[0];
 
-      if (action === 'lager') {
-        return interaction.update(buildLagerPayload());
-      }
-    }
+  if (value === 'profil') {
+    await interaction.editReply(buildProfilePayload(player)).catch(() => null);
+    return true;
+  }
+
+  if (value === 'sammeln') {
+    await interaction.editReply(runSammeln(player)).catch(() => null);
+    return true;
+  }
+
+  if (value === 'arbeiten') {
+    await interaction.editReply(runArbeiten(player)).catch(() => null);
+    return true;
+  }
+
+  if (value === 'lager') {
+    await interaction.editReply(buildLagerPayload()).catch(() => null);
+    return true;
+  }
+
+  await interaction.editReply({
+    content: 'Unbekannte Aktion. Öffne das Menü bitte erneut.',
+    embeds: [],
+    components: []
+  }).catch(() => null);
+
+  return true;
+}
 
     return false;
   }
