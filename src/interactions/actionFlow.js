@@ -15,7 +15,7 @@ const {
   setActionCooldown
 } = require('../services/playerService');
 const { applyProgressWithLevelUpAnnouncement } = require('../services/levelUpService');
-
+const { syncCampStatusMessage } = require('../services/campStatusService');
 const {
   getXpProgress,
   getCampProgress,
@@ -394,6 +394,8 @@ async function runSammeln(player, interaction) {
   const cooldownUntil = new Date(Date.now() + SAMMELN_COOLDOWN_MS).toISOString();
   setActionCooldown(player.discord_user_id, 'sammeln', cooldownUntil);
 
+  await syncCampStatusMessage(interaction.client).catch(() => null);
+
   return buildActionResultPayload({
     title: '🌿 Sammeln abgeschlossen',
     description:
@@ -443,6 +445,8 @@ async function runArbeiten(player, interaction) {
 
   const cooldownUntil = new Date(Date.now() + ARBEITEN_COOLDOWN_MS).toISOString();
   setActionCooldown(player.discord_user_id, 'arbeiten', cooldownUntil);
+
+  await syncCampStatusMessage(interaction.client).catch(() => null);
 
   return buildActionResultPayload({
     title: '🔨 Arbeit im Lager erledigt',
@@ -497,6 +501,8 @@ Aktuell ist euer Camp auf **Stufe ${camp.level}**.`
 
   const cooldownUntil = new Date(Date.now() + TRAINIEREN_COOLDOWN_MS).toISOString();
   setActionCooldown(player.discord_user_id, 'trainieren', cooldownUntil);
+
+  await syncCampStatusMessage(interaction.client).catch(() => null);
 
   return buildActionResultPayload({
     title: '💪 Training abgeschlossen',

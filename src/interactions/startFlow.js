@@ -6,6 +6,7 @@ const {
   EmbedBuilder,
   MessageFlags
 } = require('discord.js');
+const { syncCampStatusMessage } = require('../services/campStatusService')
 
 const starters = require('../config/starters');
 const guilds = require('../config/guilds');
@@ -191,6 +192,8 @@ module.exports = {
           guildKey: guild.key,
           guildRoleId: role?.id ?? null
         });
+
+        await syncCampStatusMessage(interaction.client).catch(() => null);
 
         const chatChannel = await fetchGuildChatChannel(interaction.client, guild.key).catch(() => null);
         if (chatChannel) {
