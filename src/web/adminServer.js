@@ -44,10 +44,12 @@ function startAdminServer() {
     const totals = getCampTotals();
     const notice = req.query.notice ? String(req.query.notice) : '';
     const message = req.query.message ? String(req.query.message) : '';
+    const autoRefreshMs = Math.max(0, Number(process.env.ADMIN_WEB_REFRESH_MS || 5000));
 
     res.send(renderLayout({
       title: 'Camp Indigo Admin',
-      body: renderDashboard(players, totals, notice, message)
+      body: renderDashboard(players, totals, notice, message),
+      autoRefreshMs
     }));
   });
 
@@ -162,7 +164,34 @@ function unauthorized(res) {
   return res.status(401).send('Authentifizierung erforderlich.');
 }
 
-function renderLayout({ title, body }) {
+function renderLayout({ title, body, autoRefreshMs = 0 }) {
+  const refreshScript = autoRefreshMs > 0
+    ? `
+    <script>
+      (function () {
+        const isDashboard = window.location.pathname === '/admin';
+        if (!isDashboard) return;
+
+        const formsDirty = () => {
+          const active = document.activeElement;
+          if (!active) return false;
+          const tag = (active.tagName || '').toLowerCase();
+          return tag === 'input' || tag === 'select' || tag === 'textarea';
+        };
+
+        setInterval(() => {
+          if (document.hidden) return;
+          if (formsDirty()) return;
+          window.location.reload();
+        }, ${autoRefreshMs});
+      })();
+    </script>`
+    : '';
+
+  const refreshHint = autoRefreshMs > 0
+    ? `<div style="margin-top:6px;color:var(--muted);font-size:12px;">Auto-Refresh aktiv (${Math.round(autoRefreshMs / 1000)}s)</div>`
+    : '';
+
   return `<!doctype html>
 <html lang="de">
 <head>
@@ -244,7 +273,9 @@ function renderLayout({ title, body }) {
 <body>
   <div class="wrap">
     ${body}
+    ${refreshHint}
   </div>
+  ${refreshScript}
 </body>
 </html>`;
 }
