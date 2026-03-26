@@ -3,6 +3,7 @@ const fs = require('fs');
 const { AttachmentBuilder, EmbedBuilder } = require('discord.js');
 const { getState, setState } = require('./stateService');
 const { allPlayers, getCampTotals, getTopContributorLast24Hours } = require('./playerService');
+const starters = require('../config/starters');
 const { getCampProgress } = require('./progressionService');
 const guilds = require('../config/guilds');
 
@@ -17,6 +18,7 @@ const CAMP_STATUS_TITLE = '🏕️ Camp-Fortschritt';
 const CAMP_STATUS_CHANNEL_KEY = 'camp_status_channel_id';
 const CAMP_STATUS_MESSAGE_KEY = 'camp_status_message_id';
 const LEVEL_ASSET_DIR = path.join(__dirname, '..', 'assets', 'camp');
+const POKEMON_ASSET_DIR = path.join(__dirname, '..', 'assets', 'pokemon');
 
 function getCampTopContributors(limit = 5) {
   return allPlayers()
@@ -72,6 +74,37 @@ function buildTopContributorText(players) {
   return players
     .map((player, index) => `${index + 1}. ${player.discord_username} – ${player.contribution}`)
     .join('\n');
+}
+
+function getStarterConfig(pokemonKey) {
+  return starters.find(starter => starter.key === pokemonKey) || null;
+}
+
+function getPokemonAssetPath(pokemonKey) {
+  if (!pokemonKey) return null;
+
+  const candidates = [
+    path.join(POKEMON_ASSET_DIR, `${pokemonKey}.png`),
+    path.join(POKEMON_ASSET_DIR, `${String(pokemonKey).toLowerCase()}.png`)
+  ];
+
+  for (const filePath of candidates) {
+    if (fs.existsSync(filePath)) {
+      return filePath;
+    }
+  }
+
+  return null;
+}
+
+function drawImageContain(ctx, image, x, y, width, height) {
+  const scale = Math.min(width / image.width, height / image.height);
+  const drawWidth = image.width * scale;
+  const drawHeight = image.height * scale;
+  const drawX = x + (width - drawWidth) / 2;
+  const drawY = y + (height - drawHeight) / 2;
+
+  ctx.drawImage(image, drawX, drawY, drawWidth, drawHeight);
 }
 
 async function renderCampImageBuffer() {
@@ -245,12 +278,54 @@ async function renderCampImageBuffer() {
   ctx.fillText('Aktivster Spieler (24h)', 790, 468);
 
   if (topContributor24h) {
+    const starter = getStarterConfig(topContributor24h.pokemon_key);
+
     ctx.fillStyle = colors.white;
     ctx.font = font(24, 'bold');
-    ctx.fillText(trimText(ctx, topContributor24h.discord_username, 360), 790, 512);
+    ctx.fillText(trimText(ctx, topContributor24h.discord_username, 240), 790, 512);
 
-    drawMiniStat(ctx, '+Beitrag', `+${topContributor24h.contribution_24h}`, 790, 545, 170, font, colors);
-    drawMiniStat(ctx, '+XP', `+${topContributor24h.xp_24h || 0}`, 980, 545, 170, font, colors);
+    ctx.fillStyle = colors.soft;
+    ctx.font = font(15, 'normal');
+    ctx.fillText(
+      `Partner: ${starter?.name || topContributor24h.pokemon_key || 'Unbekannt'}`,
+      790,
+      540
+    );
+
+    drawMiniStat(ctx, '+Beitrag', `+${topContributor24h.contribution_24h}`, 790, 565, 170, font, colors);
+    drawMiniStat(ctx, '+XP', `+${topContributor24h.xp_24h || 0}`, 980, 565, 170, font, colors);
+
+    const pokemonCardX = 1010;
+    const pokemonCardY = 480;
+    const pokemonCardW = 170;
+    const pokemonCardH = 125;
+
+    drawCard(ctx, pokemonCardX, pokemonCardY, pokemonCardW, pokemonCardH, 18, 'rgba(255,255,255,0.10)');
+
+    const pokemonAssetPath = getPokemonAssetPath(topContributor24h.pokemon_key);
+
+    if (pokemonAssetPath) {
+      try {
+        const pokemonImage = await loadImage(pokemonAssetPath);
+        drawImageContain(ctx, pokemonImage, pokemonCardX + 12, pokemonCardY + 8, pokemonCardW - 24, pokemonCardH - 36);
+      } catch (_error) {
+        ctx.fillStyle = colors.soft;
+        ctx.font = font(14, 'normal');
+        ctx.fillText('Bild konnte nicht geladen werden', pokemonCardX + 14, pokemonCardY + 68);
+      }
+    } else {
+      ctx.fillStyle = colors.soft;
+      ctx.font = font(14, 'normal');
+      ctx.fillText('Kein Pokémon-Bild gefunden', pokemonCardX + 14, pokemonCardY + 68);
+    }
+
+    ctx.fillStyle = colors.white;
+    ctx.font = font(14, 'bold');
+    ctx.fillText(
+      trimText(ctx, starter?.name || topContributor24h.pokemon_key || 'Unbekannt', 140),
+      pokemonCardX + 14,
+      pokemonCardY + 112
+    );
   } else {
     ctx.fillStyle = colors.soft;
     ctx.font = font(18, 'normal');

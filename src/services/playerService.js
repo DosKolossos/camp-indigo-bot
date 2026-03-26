@@ -303,13 +303,14 @@ function getTopContributorLast24Hours() {
       p.discord_user_id,
       p.discord_username,
       p.guild_key,
+      p.pokemon_key,
       COALESCE(SUM(l.contribution_delta), 0) as contribution_24h,
       COALESCE(SUM(l.xp_delta), 0) as xp_24h
     FROM player_activity_log l
     JOIN players p
       ON p.discord_user_id = l.discord_user_id
     WHERE l.created_at >= ?
-    GROUP BY p.discord_user_id, p.discord_username, p.guild_key
+    GROUP BY p.discord_user_id, p.discord_username, p.guild_key, p.pokemon_key
     HAVING contribution_24h > 0 OR xp_24h > 0
     ORDER BY contribution_24h DESC, xp_24h DESC, p.discord_username ASC
     LIMIT 1
