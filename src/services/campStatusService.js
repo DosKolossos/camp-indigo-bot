@@ -80,7 +80,7 @@ async function renderCampImageBuffer() {
   const { createCanvas, loadImage, GlobalFonts } = CanvasLib;
   const totals = getCampTotals();
   const progress = getCampProgress(totals.contribution);
-  const topContributors = getCampTopContributors(5);
+  const topContributors = getCampTopContributors(3);
   const width = 1280;
   const height = 720;
   const canvas = createCanvas(width, height);
@@ -103,16 +103,14 @@ async function renderCampImageBuffer() {
   ];
 
   for (const candidate of fontCandidates) {
-    console.log(`[camp-status] checking font: ${candidate}`);
-
     if (fs.existsSync(candidate)) {
       try {
         GlobalFonts.registerFromPath(candidate, 'CampStatusSans');
         fontFamily = 'CampStatusSans';
         fontLoadedFrom = candidate;
         break;
-      } catch (error) {
-        console.error(`[camp-status] failed to register font: ${candidate}`, error);
+      } catch (_error) {
+        // ignore duplicate registrations
       }
     }
   }
@@ -122,6 +120,19 @@ async function renderCampImageBuffer() {
 
   const font = (size, weight = 'normal') => `${weight} ${size}px ${fontFamily}`;
 
+  const colors = {
+    white: '#f8fafc',
+    soft: '#cbd5e1',
+    muted: '#94a3b8',
+    gold: '#fde68a',
+    green: '#22c55e',
+    blue: '#93c5fd',
+    border: 'rgba(255,255,255,0.08)',
+    panel: 'rgba(15, 23, 42, 0.78)',
+    card: 'rgba(255,255,255,0.08)',
+    cardStrong: 'rgba(255,255,255,0.12)'
+  };
+
   const bgPath = getCampAssetPath(progress.level);
   if (bgPath) {
     try {
@@ -129,30 +140,34 @@ async function renderCampImageBuffer() {
       ctx.drawImage(image, 0, 0, width, height);
     } catch (_error) {
       drawFallbackBackground(ctx, width, height, progress.level);
-
     }
   } else {
     drawFallbackBackground(ctx, width, height, progress.level);
   }
+
   drawOverlayPanel(ctx, width, height);
-
-  ctx.fillStyle = '#ffffff';
-  ctx.font = font(42, 'bold');
-  ctx.fillText('Camp Indigo', 54, 78);
-
-  ctx.font = font(24, 'bold');
-  ctx.fillStyle = '#dbeafe';
-  ctx.fillText(`Camp-Stufe ${progress.level}`, 56, 118);
 
   const progressPercent = progress.isMaxLevel
     ? 1
     : Math.max(0, Math.min(1, progress.currentInLevel / Math.max(1, progress.neededForNextLevel)));
 
+  const nextTarget = progress.nextLevelTarget ?? totals.contribution;
+  const percentText = progress.isMaxLevel ? '100%' : `${Math.round(progressPercent * 100)}%`;
+
+  // Header links
+  ctx.fillStyle = colors.white;
+  ctx.font = font(30, 'bold');
+  ctx.fillText('Camp Indigo', 56, 76);
+
+  ctx.fillStyle = colors.soft;
+  ctx.font = font(18, 'bold');
+  ctx.fillText(`Camp-Stufe ${progress.level}`, 56, 110);
+
   drawProgressBar(ctx, {
     x: 56,
-    y: 148,
+    y: 146,
     width: 430,
-    height: 24,
+    height: 22,
     fillPercent: progressPercent,
     label: progress.isMaxLevel
       ? 'Max-Stufe erreicht'
@@ -160,90 +175,91 @@ async function renderCampImageBuffer() {
     fontFamily
   });
 
-  const nextTarget = progress.nextLevelTarget ?? totals.contribution;
-  const percentText = progress.isMaxLevel ? '100%' : `${Math.round(progressPercent * 100)}%`;
+  ctx.fillStyle = colors.white;
+  ctx.font = font(24, 'bold');
+  ctx.fillText(`${totals.contribution} / ${nextTarget}`, 56, 220);
 
-  ctx.font = font(42, 'bold');
-  ctx.fillStyle = '#ffffff';
-  ctx.fillText(`${totals.contribution} / ${nextTarget}`, 56, 232);
-
-  ctx.font = font(20, 'bold');
-  ctx.fillStyle = '#cbd5e1';
+  ctx.fillStyle = colors.soft;
+  ctx.font = font(16, 'normal');
   ctx.fillText(
     progress.isMaxLevel
       ? 'Maximale Camp-Stufe erreicht'
       : `Noch ${progress.remainingToNextLevel} Beitrag bis Stufe ${progress.nextLevel} • ${percentText}`,
     56,
-    264
+    250
   );
 
-  ctx.fillStyle = 'rgba(255,255,255,0.08)';
-  roundRect(ctx, 56, 300, 430, 132, 18);
-  ctx.fill();
+  // Linke Karten
+  drawCard(ctx, 56, 292, 430, 128, 18, colors.card);
+  drawCard(ctx, 56, 446, 430, 160, 18, colors.card);
 
-  ctx.font = font(42, 'bold');
-  ctx.fillStyle = '#fde68a';
-  ctx.fillText('Camp-Daten', 76, 338);
+  ctx.fillStyle = colors.gold;
+  ctx.font = font(18, 'bold');
+  ctx.fillText('Camp-Daten', 76, 325);
 
-  ctx.font = font(42, 'bold');
-  ctx.fillStyle = '#f8fafc';
-  ctx.fillText(`Abenteurer: ${totals.players}`, 76, 374);
-  ctx.fillText(`Gesamtbeitrag: ${totals.contribution}`, 76, 404);
-  ctx.fillText(`Gesamt-XP: ${totals.xp}`, 76, 434);
+  drawLabelValue(ctx, 'Abenteurer', String(totals.players), 76, 360, 456, font, colors);
+  drawLabelValue(ctx, 'Gesamtbeitrag', String(totals.contribution), 76, 392, 456, font, colors);
+  drawLabelValue(ctx, 'Gesamt-XP', String(totals.xp), 76, 424, 456, font, colors);
 
-  ctx.font = font(42, 'bold');
-  ctx.fillStyle = '#fde68a';
-  ctx.fillText('Freigeschaltet', 56, 492);
+  ctx.fillStyle = colors.gold;
+  ctx.font = font(18, 'bold');
+  ctx.fillText('Freigeschaltet', 76, 480);
 
-  ctx.font = font(20, 'bold');
-  ctx.fillStyle = '#f8fafc';
+  ctx.font = font(17, 'normal');
+  ctx.fillStyle = colors.white;
   getUnlockedFeatures(progress.level).forEach((feature, index) => {
-    ctx.fillText(`• ${feature}`, 56, 528 + (index * 30));
+    ctx.fillText(`• ${feature}`, 76, 515 + (index * 30));
   });
 
-  ctx.font = font(42, 'bold');
-  ctx.fillStyle = '#ffffff';
-  ctx.fillText('Top-Beiträger', 790, 78);
+  // Rechte Spalte
+  drawCard(ctx, 760, 44, 460, 350, 20, colors.card);
+  drawCard(ctx, 760, 430, 460, 180, 20, colors.cardStrong);
 
-  ctx.font = font(42, 'bold');
+  ctx.fillStyle = colors.white;
+  ctx.font = font(24, 'bold');
+  ctx.fillText('Top-Beiträger', 790, 82);
+
   topContributors.forEach((player, index) => {
-    const y = 128 + (index * 72);
-    ctx.fillStyle = '#93c5fd';
-    ctx.fillText(`#${index + 1}`, 792, y);
-    ctx.fillStyle = '#ffffff';
-    ctx.fillText(trimText(ctx, player.discord_username, 300), 850, y);
-    ctx.fillStyle = '#fde68a';
-    ctx.fillText(`${player.contribution} Beitrag`, 850, y + 32);
+    const medal = index === 0 ? '🥇' : index === 1 ? '🥈' : '🥉';
+    const y = 132 + (index * 86);
+
+    ctx.fillStyle = colors.gold;
+    ctx.font = font(22, 'bold');
+    ctx.fillText(medal, 792, y);
+
+    ctx.fillStyle = colors.white;
+    ctx.font = font(24, 'bold');
+    ctx.fillText(trimText(ctx, player.discord_username, 300), 842, y);
+
+    ctx.fillStyle = colors.blue;
+    ctx.font = font(16, 'normal');
+    ctx.fillText(`Platz ${index + 1}`, 842, y + 24);
+
+    ctx.fillStyle = colors.gold;
+    ctx.font = font(20, 'bold');
+    ctx.fillText(`${player.contribution} Beitrag`, 842, y + 52);
   });
 
-  ctx.fillStyle = 'rgba(255,255,255,0.08)';
-  roundRect(ctx, 780, 470, 430, 150, 18);
-  ctx.fill();
-
-  ctx.font = font(42, 'bold');
-  ctx.fillStyle = '#fde68a';
-  ctx.fillText('Aktivster Spieler (24h)', 800, 510);
+  ctx.fillStyle = colors.gold;
+  ctx.font = font(22, 'bold');
+  ctx.fillText('Aktivster Spieler (24h)', 790, 468);
 
   if (topContributor24h) {
-    ctx.font = font(42, 'bold');
-    ctx.fillStyle = '#ffffff';
-    ctx.fillText(trimText(ctx, topContributor24h.discord_username, 320), 800, 552);
+    ctx.fillStyle = colors.white;
+    ctx.font = font(24, 'bold');
+    ctx.fillText(trimText(ctx, topContributor24h.discord_username, 360), 790, 512);
 
-    ctx.font = font(42, 'bold');
-    ctx.fillStyle = '#93c5fd';
-    ctx.fillText(`+${topContributor24h.contribution_24h} Beitrag`, 800, 588);
-
-    ctx.fillStyle = '#cbd5e1';
-    ctx.fillText(`+${topContributor24h.xp_24h || 0} XP`, 800, 616);
+    drawMiniStat(ctx, '+Beitrag', `+${topContributor24h.contribution_24h}`, 790, 545, 170, font, colors);
+    drawMiniStat(ctx, '+XP', `+${topContributor24h.xp_24h || 0}`, 980, 545, 170, font, colors);
   } else {
-    ctx.font = font(42, 'bold');
-    ctx.fillStyle = '#cbd5e1';
-    ctx.fillText('Noch keine Aktivität in den letzten 24h.', 800, 556);
+    ctx.fillStyle = colors.soft;
+    ctx.font = font(18, 'normal');
+    ctx.fillText('Noch keine Aktivität in den letzten 24h.', 790, 512);
   }
 
-  ctx.font = font(42, 'bold');
-  ctx.fillStyle = 'rgba(255,255,255,0.85)';
-  ctx.fillText('Grafik wird automatisch bei Lagerfortschritt aktualisiert.', 56, 676);
+  ctx.fillStyle = 'rgba(255,255,255,0.82)';
+  ctx.font = font(16, 'normal');
+  ctx.fillText('Grafik wird automatisch bei Lagerfortschritt aktualisiert.', 56, 664);
 
   return canvas.toBuffer('image/png');
 }
@@ -323,7 +339,7 @@ function drawOverlayPanel(ctx, width, height) {
 }
 
 function drawProgressBar(ctx, { x, y, width, height, fillPercent, label, fontFamily = 'sans-serif' }) {
-  ctx.fillStyle = 'rgba(255,255,255,0.15)';
+  ctx.fillStyle = 'rgba(255,255,255,0.16)';
   roundRect(ctx, x, y, width, height, 12);
   ctx.fill();
 
@@ -331,9 +347,40 @@ function drawProgressBar(ctx, { x, y, width, height, fillPercent, label, fontFam
   roundRect(ctx, x, y, Math.max(18, width * fillPercent), height, 12);
   ctx.fill();
 
-  ctx.font = `18px ${fontFamily}`;
-  ctx.fillStyle = '#e2e8f0';
-  ctx.fillText(label, x, y + height + 28);
+  ctx.font = `16px ${fontFamily}`;
+  ctx.fillStyle = '#dbeafe';
+  ctx.fillText(label, x, y + height + 24);
+}
+
+function drawCard(ctx, x, y, width, height, radius, fillStyle) {
+  ctx.fillStyle = fillStyle;
+  roundRect(ctx, x, y, width, height, radius);
+  ctx.fill();
+}
+
+function drawLabelValue(ctx, label, value, x, y, valueX, font, colors) {
+  ctx.fillStyle = colors.soft;
+  ctx.font = font(15, 'normal');
+  ctx.fillText(label, x, y);
+
+  ctx.fillStyle = colors.white;
+  ctx.font = font(22, 'bold');
+  const measured = ctx.measureText(value).width;
+  ctx.fillText(value, valueX - measured, y);
+}
+
+function drawMiniStat(ctx, label, value, x, y, width, font, colors) {
+  ctx.fillStyle = 'rgba(255,255,255,0.10)';
+  roundRect(ctx, x, y, width, 52, 14);
+  ctx.fill();
+
+  ctx.fillStyle = colors.soft;
+  ctx.font = font(13, 'normal');
+  ctx.fillText(label, x + 14, y + 18);
+
+  ctx.fillStyle = colors.white;
+  ctx.font = font(22, 'bold');
+  ctx.fillText(value, x + 14, y + 40);
 }
 
 function roundRect(ctx, x, y, width, height, radius) {
