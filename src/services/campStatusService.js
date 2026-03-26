@@ -332,6 +332,7 @@ async function buildCampStatusPayload() {
   const progress = getCampProgress(totals.contribution);
   const topContributors = getCampTopContributors(5);
   const contributorsText = buildTopContributorText(topContributors);
+
   const embed = new EmbedBuilder()
     .setTitle(CAMP_STATUS_TITLE)
     .setDescription(
@@ -348,15 +349,18 @@ async function buildCampStatusPayload() {
     return { embeds: [embed], components: [] };
   }
 
-  const attachment = new AttachmentBuilder(buffer, { name: 'camp-status.png' });
-  embed.setImage('attachment://camp-status.png');
+  const fileName = `camp-status-${progress.level}-${totals.contribution}-${Date.now()}.png`;
+  const attachment = new AttachmentBuilder(buffer, { name: fileName });
+  embed.setImage(`attachment://${fileName}`);
 
   return {
     embeds: [embed],
     files: [attachment],
+    attachments: [],
     components: []
   };
 }
+
 
 function getGuildConfig(guildKey) {
   return guilds.find(guild => guild.key === guildKey) || null;
