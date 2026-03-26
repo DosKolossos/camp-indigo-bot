@@ -148,3 +148,5 @@ if (!ENABLE_DISCORD_BOT) {
 
   client.login(process.env.DISCORD_TOKEN);
 }
+
+// moini?
