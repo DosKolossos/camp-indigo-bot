@@ -91,20 +91,28 @@ async function renderCampImageBuffer() {
   let fontLoadedFrom = null;
 
   const fontCandidates = [
-    path.join(__dirname, '..', 'assets', 'camp', 'Inter-Regular.ttf'),
-    path.join(__dirname, '..', 'assets', 'camp', 'FORTE.ttf'),
+    path.join(process.cwd(), 'src', 'assets', 'camp', 'Inter-Regular.TTF'),
+    path.join(process.cwd(), 'src', 'assets', 'camp', 'FORTE.TTF'),
+    path.join(process.cwd(), 'assets', 'camp', 'Inter-Regular.TTF'),
+    path.join(process.cwd(), 'assets', 'camp', 'FORTE.TTF'),
+    path.join(__dirname, '..', 'assets', 'camp', 'Inter-Regular.TTF'),
+    path.join(__dirname, '..', 'assets', 'camp', 'FORTE.TTF'),
+    path.join(__dirname, '..', '..', 'assets', 'camp', 'Inter-Regular.TTF'),
+    path.join(__dirname, '..', '..', 'assets', 'camp', 'FORTE.TTF'),
     '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf'
   ];
 
   for (const candidate of fontCandidates) {
+    console.log(`[camp-status] checking font: ${candidate}`);
+
     if (fs.existsSync(candidate)) {
       try {
         GlobalFonts.registerFromPath(candidate, 'CampStatusSans');
         fontFamily = 'CampStatusSans';
         fontLoadedFrom = candidate;
         break;
-      } catch (_error) {
-        // ignore duplicate or failed registration
+      } catch (error) {
+        console.error(`[camp-status] failed to register font: ${candidate}`, error);
       }
     }
   }
