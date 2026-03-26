@@ -416,7 +416,6 @@ async function findCampStatusMessageByScan(channel) {
 
   return null;
 }
-
 async function ensureCampStatusMessage(client, guildKeyOrChannelId, explicitTargetChannelId = null) {
   const guildMode = isGuildKey(guildKeyOrChannelId);
   const guildKey = guildMode ? guildKeyOrChannelId : null;
@@ -456,32 +455,34 @@ async function ensureCampStatusMessage(client, guildKeyOrChannelId, explicitTarg
       await existing.message.delete().catch(() => null);
       finalMessage = await targetChannel.send(payload);
     }
-
-    if (guildMode) {
-      setState(getCampStatusChannelStateKey(guildKey), targetChannel.id);
-      setState(getCampStatusMessageStateKey(guildKey), finalMessage.id);
-    } else {
-      setState(CAMP_STATUS_CHANNEL_KEY, targetChannel.id);
-      setState(CAMP_STATUS_MESSAGE_KEY, finalMessage.id);
-    }
-
-    return { channel: targetChannel, message: finalMessage };
+  } else {
+    finalMessage = await targetChannel.send(payload);
   }
 
-  async function syncCampStatusMessage(client, guildKey) {
-    if (!guildKey) return null;
-
-    return ensureCampStatusMessage(client, guildKey).catch(error => {
-      console.error(`Camp-Status für Gilde "${guildKey}" konnte nicht synchronisiert werden:`, error);
-      return null;
-    });
+  if (guildMode) {
+    setState(getCampStatusChannelStateKey(guildKey), targetChannel.id);
+    setState(getCampStatusMessageStateKey(guildKey), finalMessage.id);
+  } else {
+    setState(CAMP_STATUS_CHANNEL_KEY, targetChannel.id);
+    setState(CAMP_STATUS_MESSAGE_KEY, finalMessage.id);
   }
 
+  return { channel: targetChannel, message: finalMessage };
+}
 
-  module.exports = {
-    CAMP_STATUS_TITLE,
-    buildCampStatusPayload,
-    ensureCampStatusMessage,
-    syncCampStatusMessage,
-    getCampTopContributors
-  };}
+async function syncCampStatusMessage(client, guildKey) {
+  if (!guildKey) return null;
+
+  return ensureCampStatusMessage(client, guildKey).catch(error => {
+    console.error(`Camp-Status für Gilde "${guildKey}" konnte nicht synchronisiert werden:`, error);
+    return null;
+  });
+}
+
+module.exports = {
+  CAMP_STATUS_TITLE,
+  buildCampStatusPayload,
+  ensureCampStatusMessage,
+  syncCampStatusMessage,
+  getCampTopContributors
+};
