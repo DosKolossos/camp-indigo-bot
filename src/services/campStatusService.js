@@ -448,40 +448,40 @@ async function ensureCampStatusMessage(client, guildKeyOrChannelId, explicitTarg
   if (existing) {
     const sameChannel = existing.channel.id === targetChannel.id;
     if (sameChannel) {
-      finalMessage = await existing.message.edit(payload);
+      finalMessage = await existing.message.edit({
+        ...payload,
+        attachments: []
+      });
     } else {
       await existing.message.delete().catch(() => null);
       finalMessage = await targetChannel.send(payload);
     }
-  } else {
-    finalMessage = await targetChannel.send(payload);
+
+    if (guildMode) {
+      setState(getCampStatusChannelStateKey(guildKey), targetChannel.id);
+      setState(getCampStatusMessageStateKey(guildKey), finalMessage.id);
+    } else {
+      setState(CAMP_STATUS_CHANNEL_KEY, targetChannel.id);
+      setState(CAMP_STATUS_MESSAGE_KEY, finalMessage.id);
+    }
+
+    return { channel: targetChannel, message: finalMessage };
   }
 
-  if (guildMode) {
-    setState(getCampStatusChannelStateKey(guildKey), targetChannel.id);
-    setState(getCampStatusMessageStateKey(guildKey), finalMessage.id);
-  } else {
-    setState(CAMP_STATUS_CHANNEL_KEY, targetChannel.id);
-    setState(CAMP_STATUS_MESSAGE_KEY, finalMessage.id);
+  async function syncCampStatusMessage(client, guildKey) {
+    if (!guildKey) return null;
+
+    return ensureCampStatusMessage(client, guildKey).catch(error => {
+      console.error(`Camp-Status für Gilde "${guildKey}" konnte nicht synchronisiert werden:`, error);
+      return null;
+    });
   }
 
-  return { channel: targetChannel, message: finalMessage };
-}
 
-async function syncCampStatusMessage(client, guildKey) {
-  if (!guildKey) return null;
-
-  return ensureCampStatusMessage(client, guildKey).catch(error => {
-    console.error(`Camp-Status für Gilde "${guildKey}" konnte nicht synchronisiert werden:`, error);
-    return null;
-  });
-}
-
-
-module.exports = {
-  CAMP_STATUS_TITLE,
-  buildCampStatusPayload,
-  ensureCampStatusMessage,
-  syncCampStatusMessage,
-  getCampTopContributors
-};
+  module.exports = {
+    CAMP_STATUS_TITLE,
+    buildCampStatusPayload,
+    ensureCampStatusMessage,
+    syncCampStatusMessage,
+    getCampTopContributors
+  };
