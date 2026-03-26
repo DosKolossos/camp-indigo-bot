@@ -484,4 +484,4 @@ async function ensureCampStatusMessage(client, guildKeyOrChannelId, explicitTarg
     ensureCampStatusMessage,
     syncCampStatusMessage,
     getCampTopContributors
-  };
+  };}
