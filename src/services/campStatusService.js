@@ -92,7 +92,7 @@ async function renderCampImageBuffer() {
 
   const fontCandidates = [
     path.join(__dirname, '..', 'assets', 'camp', 'Inter-Regular.ttf'),
-    path.join(__dirname, '..', 'assets', 'camp', 'DejaVuSans.ttf'),
+    path.join(__dirname, '..', 'assets', 'camp', 'FORTE.ttf'),
     '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf'
   ];
 
