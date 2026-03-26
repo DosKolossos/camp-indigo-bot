@@ -189,7 +189,7 @@ function renderLayout({ title, body, autoRefreshMs = 0 }) {
     : '';
 
   const refreshHint = autoRefreshMs > 0
-    ? `<div style="margin-top:6px;color:var(--muted);font-size:12px;">Auto-Refresh aktiv (${Math.round(autoRefreshMs / 1000)}s)</div>`
+    ? ``
     : '';
 
   return `<!doctype html>
