@@ -115,7 +115,6 @@ async function renderCampImageBuffer() {
   } else {
     drawFallbackBackground(ctx, width, height, progress.level);
   }
-  console.log(`[camp-status] canvas available: ${Boolean(CanvasLib)}`);
   drawOverlayPanel(ctx, width, height);
 
   ctx.fillStyle = '#ffffff';
@@ -144,9 +143,9 @@ async function renderCampImageBuffer() {
   const nextTarget = progress.nextLevelTarget ?? totals.contribution;
   const percentText = progress.isMaxLevel ? '100%' : `${Math.round(progressPercent * 100)}%`;
 
-  ctx.font = 'bold 34px CampStatusSans';
+  ctx.font = 'bold 38px CampStatusSans';
   ctx.fillStyle = '#ffffff';
-  ctx.fillText(`${totals.contribution} / ${nextTarget}`, 56, 230);
+  ctx.fillText(`${totals.contribution} / ${nextTarget}`, 56, 232);
 
   ctx.font = '20px CampStatusSans';
   ctx.fillStyle = '#cbd5e1';
@@ -155,23 +154,31 @@ async function renderCampImageBuffer() {
       ? 'Maximale Camp-Stufe erreicht'
       : `Noch ${progress.remainingToNextLevel} Beitrag bis Stufe ${progress.nextLevel} • ${percentText}`,
     56,
-    260
+    264
   );
+
+  ctx.fillStyle = 'rgba(255,255,255,0.08)';
+  roundRect(ctx, 56, 300, 430, 132, 18);
+  ctx.fill();
+
+  ctx.font = 'bold 22px CampStatusSans';
+  ctx.fillStyle = '#fde68a';
+  ctx.fillText('Camp-Daten', 76, 338);
 
   ctx.font = '20px CampStatusSans';
   ctx.fillStyle = '#f8fafc';
-  ctx.fillText(`Abenteurer: ${totals.players}`, 56, 224);
-  ctx.fillText(`Gesamtbeitrag: ${totals.contribution}`, 56, 256);
-  ctx.fillText(`Gesamt-XP: ${totals.xp}`, 56, 288);
+  ctx.fillText(`Abenteurer: ${totals.players}`, 76, 374);
+  ctx.fillText(`Gesamtbeitrag: ${totals.contribution}`, 76, 404);
+  ctx.fillText(`Gesamt-XP: ${totals.xp}`, 76, 434);
 
   ctx.font = 'bold 24px CampStatusSans';
   ctx.fillStyle = '#fde68a';
-  ctx.fillText('Freigeschaltet', 56, 356);
+  ctx.fillText('Freigeschaltet', 56, 492);
 
   ctx.font = '20px CampStatusSans';
   ctx.fillStyle = '#f8fafc';
   getUnlockedFeatures(progress.level).forEach((feature, index) => {
-    ctx.fillText(`• ${feature}`, 56, 392 + (index * 30));
+    ctx.fillText(`• ${feature}`, 56, 528 + (index * 30));
   });
 
   ctx.font = 'bold 28px CampStatusSans';
@@ -190,7 +197,7 @@ async function renderCampImageBuffer() {
   });
 
   ctx.fillStyle = 'rgba(255,255,255,0.08)';
-  roundRect(ctx, 780, 470, 430, 130, 18);
+  roundRect(ctx, 780, 470, 430, 150, 18);
   ctx.fill();
 
   ctx.font = 'bold 24px CampStatusSans';
@@ -198,22 +205,20 @@ async function renderCampImageBuffer() {
   ctx.fillText('Aktivster Spieler (24h)', 800, 510);
 
   if (topContributor24h) {
-    ctx.font = 'bold 26px CampStatusSans';
+    ctx.font = 'bold 28px CampStatusSans';
     ctx.fillStyle = '#ffffff';
-    ctx.fillText(trimText(ctx, topContributor24h.discord_username, 320), 800, 548);
+    ctx.fillText(trimText(ctx, topContributor24h.discord_username, 320), 800, 552);
 
     ctx.font = '20px CampStatusSans';
     ctx.fillStyle = '#93c5fd';
-    ctx.fillText(`${topContributor24h.contribution_24h} Beitrag in den letzten 24h`, 800, 582);
+    ctx.fillText(`+${topContributor24h.contribution_24h} Beitrag`, 800, 588);
 
-    if ((topContributor24h.xp_24h || 0) > 0) {
-      ctx.fillStyle = '#cbd5e1';
-      ctx.fillText(`${topContributor24h.xp_24h} XP zusätzlich`, 800, 610);
-    }
+    ctx.fillStyle = '#cbd5e1';
+    ctx.fillText(`+${topContributor24h.xp_24h || 0} XP`, 800, 616);
   } else {
     ctx.font = '20px CampStatusSans';
     ctx.fillStyle = '#cbd5e1';
-    ctx.fillText('Noch keine Aktivität in den letzten 24h.', 800, 552);
+    ctx.fillText('Noch keine Aktivität in den letzten 24h.', 800, 556);
   }
 
   ctx.font = '18px CampStatusSans';
