@@ -295,8 +295,8 @@ async function renderCampImageBuffer() {
     drawMiniStat(ctx, '+Beitrag', `+${topContributor24h.contribution_24h}`, 790, 565, 170, font, colors);
     drawMiniStat(ctx, '+XP', `+${topContributor24h.xp_24h || 0}`, 980, 565, 170, font, colors);
 
-    const pokemonCardX = 1010;
-    const pokemonCardY = 480;
+    const pokemonCardX = 1060;
+    const pokemonCardY = 460;
     const pokemonCardW = 170;
     const pokemonCardH = 125;
 
