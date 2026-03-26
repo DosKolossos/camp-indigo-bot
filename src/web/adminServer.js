@@ -44,7 +44,7 @@ function startAdminServer() {
     const totals = getCampTotals();
     const notice = req.query.notice ? String(req.query.notice) : '';
     const message = req.query.message ? String(req.query.message) : '';
-    const autoRefreshMs = Math.max(0, Number(process.env.ADMIN_WEB_REFRESH_MS || 5000));
+    const autoRefreshMs = 0;
 
     res.send(renderLayout({
       title: 'Camp Indigo Admin',
