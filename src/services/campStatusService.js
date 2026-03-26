@@ -195,11 +195,11 @@ async function renderCampImageBuffer() {
 
   ctx.fillStyle = colors.gold;
   ctx.font = font(18, 'bold');
-  ctx.fillText('Camp-Daten', 76, 325);
+  ctx.fillText('Camp-Daten', 76, 300);
 
-  drawLabelValue(ctx, 'Abenteurer', String(totals.players), 76, 360, 456, font, colors);
-  drawLabelValue(ctx, 'Gesamtbeitrag', String(totals.contribution), 76, 392, 456, font, colors);
-  drawLabelValue(ctx, 'Gesamt-XP', String(totals.xp), 76, 424, 456, font, colors);
+  drawLabelValue(ctx, 'Abenteurer', String(totals.players), 76, 335, 456, font, colors);
+  drawLabelValue(ctx, 'Gesamtbeitrag', String(totals.contribution), 76, 367, 456, font, colors);
+  drawLabelValue(ctx, 'Gesamt-XP', String(totals.xp), 76, 399, 456, font, colors);
 
   ctx.fillStyle = colors.gold;
   ctx.font = font(18, 'bold');
@@ -237,7 +237,7 @@ async function renderCampImageBuffer() {
 
     ctx.fillStyle = colors.gold;
     ctx.font = font(20, 'bold');
-    ctx.fillText(`${player.contribution} Beitrag`, 842, y + 52);
+    ctx.fillText(`Gesamtbeitrag: ${player.contribution}`, 842, y + 52);
   });
 
   ctx.fillStyle = colors.gold;
