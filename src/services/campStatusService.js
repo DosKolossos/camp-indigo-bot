@@ -87,7 +87,11 @@ async function renderCampImageBuffer() {
   const topContributor24h = getTopContributorLast24Hours();
   const ctx = canvas.getContext('2d');
 
+  let fontFamily = 'sans-serif';
+  let fontLoadedFrom = null;
+
   const fontCandidates = [
+    path.join(__dirname, '..', 'assets', 'camp', 'Inter-Regular.ttf'),
     path.join(__dirname, '..', 'assets', 'camp', 'DejaVuSans.ttf'),
     '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf'
   ];
@@ -96,12 +100,19 @@ async function renderCampImageBuffer() {
     if (fs.existsSync(candidate)) {
       try {
         GlobalFonts.registerFromPath(candidate, 'CampStatusSans');
+        fontFamily = 'CampStatusSans';
+        fontLoadedFrom = candidate;
         break;
       } catch (_error) {
         // ignore duplicate or failed registration
       }
     }
   }
+
+  console.log(`[camp-status] font family: ${fontFamily}`);
+  console.log(`[camp-status] font source: ${fontLoadedFrom || 'none'}`);
+
+  const font = (size, weight = 'normal') => `${weight} ${size}px ${fontFamily}`;
 
   const bgPath = getCampAssetPath(progress.level);
   if (bgPath) {
@@ -118,10 +129,10 @@ async function renderCampImageBuffer() {
   drawOverlayPanel(ctx, width, height);
 
   ctx.fillStyle = '#ffffff';
-  ctx.font = 'bold 42px CampStatusSans';
+  ctx.font = font(42, 'bold');
   ctx.fillText('Camp Indigo', 54, 78);
 
-  ctx.font = '24px CampStatusSans';
+  ctx.font = font(24, 'bold');
   ctx.fillStyle = '#dbeafe';
   ctx.fillText(`Camp-Stufe ${progress.level}`, 56, 118);
 
@@ -137,17 +148,18 @@ async function renderCampImageBuffer() {
     fillPercent: progressPercent,
     label: progress.isMaxLevel
       ? 'Max-Stufe erreicht'
-      : `${progress.currentInLevel}/${progress.neededForNextLevel} Beitrag bis Stufe ${progress.nextLevel}`
+      : `${progress.currentInLevel}/${progress.neededForNextLevel} Beitrag bis Stufe ${progress.nextLevel}`,
+    fontFamily
   });
 
   const nextTarget = progress.nextLevelTarget ?? totals.contribution;
   const percentText = progress.isMaxLevel ? '100%' : `${Math.round(progressPercent * 100)}%`;
 
-  ctx.font = 'bold 38px CampStatusSans';
+  ctx.font = font(42, 'bold');
   ctx.fillStyle = '#ffffff';
   ctx.fillText(`${totals.contribution} / ${nextTarget}`, 56, 232);
 
-  ctx.font = '20px CampStatusSans';
+  ctx.font = font(20, 'bold');
   ctx.fillStyle = '#cbd5e1';
   ctx.fillText(
     progress.isMaxLevel
@@ -161,31 +173,31 @@ async function renderCampImageBuffer() {
   roundRect(ctx, 56, 300, 430, 132, 18);
   ctx.fill();
 
-  ctx.font = 'bold 22px CampStatusSans';
+  ctx.font = font(42, 'bold');
   ctx.fillStyle = '#fde68a';
   ctx.fillText('Camp-Daten', 76, 338);
 
-  ctx.font = '20px CampStatusSans';
+  ctx.font = font(42, 'bold');
   ctx.fillStyle = '#f8fafc';
   ctx.fillText(`Abenteurer: ${totals.players}`, 76, 374);
   ctx.fillText(`Gesamtbeitrag: ${totals.contribution}`, 76, 404);
   ctx.fillText(`Gesamt-XP: ${totals.xp}`, 76, 434);
 
-  ctx.font = 'bold 24px CampStatusSans';
+  ctx.font = font(42, 'bold');
   ctx.fillStyle = '#fde68a';
   ctx.fillText('Freigeschaltet', 56, 492);
 
-  ctx.font = '20px CampStatusSans';
+  ctx.font = font(20, 'bold');
   ctx.fillStyle = '#f8fafc';
   getUnlockedFeatures(progress.level).forEach((feature, index) => {
     ctx.fillText(`• ${feature}`, 56, 528 + (index * 30));
   });
 
-  ctx.font = 'bold 28px CampStatusSans';
+  ctx.font = font(42, 'bold');
   ctx.fillStyle = '#ffffff';
   ctx.fillText('Top-Beiträger', 790, 78);
 
-  ctx.font = '22px CampStatusSans';
+  ctx.font = font(42, 'bold');
   topContributors.forEach((player, index) => {
     const y = 128 + (index * 72);
     ctx.fillStyle = '#93c5fd';
@@ -200,28 +212,28 @@ async function renderCampImageBuffer() {
   roundRect(ctx, 780, 470, 430, 150, 18);
   ctx.fill();
 
-  ctx.font = 'bold 24px CampStatusSans';
+  ctx.font = font(42, 'bold');
   ctx.fillStyle = '#fde68a';
   ctx.fillText('Aktivster Spieler (24h)', 800, 510);
 
   if (topContributor24h) {
-    ctx.font = 'bold 28px CampStatusSans';
+    ctx.font = font(42, 'bold');
     ctx.fillStyle = '#ffffff';
     ctx.fillText(trimText(ctx, topContributor24h.discord_username, 320), 800, 552);
 
-    ctx.font = '20px CampStatusSans';
+    ctx.font = font(42, 'bold');
     ctx.fillStyle = '#93c5fd';
     ctx.fillText(`+${topContributor24h.contribution_24h} Beitrag`, 800, 588);
 
     ctx.fillStyle = '#cbd5e1';
     ctx.fillText(`+${topContributor24h.xp_24h || 0} XP`, 800, 616);
   } else {
-    ctx.font = '20px CampStatusSans';
+    ctx.font = font(42, 'bold');
     ctx.fillStyle = '#cbd5e1';
     ctx.fillText('Noch keine Aktivität in den letzten 24h.', 800, 556);
   }
 
-  ctx.font = '18px CampStatusSans';
+  ctx.font = font(42, 'bold');
   ctx.fillStyle = 'rgba(255,255,255,0.85)';
   ctx.fillText('Grafik wird automatisch bei Lagerfortschritt aktualisiert.', 56, 676);
 
@@ -302,7 +314,7 @@ function drawOverlayPanel(ctx, width, height) {
   ctx.fill();
 }
 
-function drawProgressBar(ctx, { x, y, width, height, fillPercent, label }) {
+function drawProgressBar(ctx, { x, y, width, height, fillPercent, label, fontFamily = 'sans-serif' }) {
   ctx.fillStyle = 'rgba(255,255,255,0.15)';
   roundRect(ctx, x, y, width, height, 12);
   ctx.fill();
@@ -311,7 +323,7 @@ function drawProgressBar(ctx, { x, y, width, height, fillPercent, label }) {
   roundRect(ctx, x, y, Math.max(18, width * fillPercent), height, 12);
   ctx.fill();
 
-  ctx.font = '18px CampStatusSans';
+  ctx.font = `18px ${fontFamily}`;
   ctx.fillStyle = '#e2e8f0';
   ctx.fillText(label, x, y + height + 28);
 }
