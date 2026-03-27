@@ -175,6 +175,7 @@ async function renderCampImageBuffer(guildKey = null) {
     border: 'rgba(255,255,255,0.08)',
     panel: 'rgba(15, 23, 42, 0.78)',
     card: 'rgba(255,255,255,0.08)',
+    cardBlack: 'rgba(0,0,0,0.38)',
     cardStrong: 'rgba(255,255,255,0.12)'
   };
 
@@ -199,21 +200,21 @@ async function renderCampImageBuffer(guildKey = null) {
   const percentText = progress.isMaxLevel ? '100%' : `${Math.round(progressPercent * 100)}%`;
 
   // Header
-  ctx.fillStyle = colors.black;
+  ctx.fillStyle = colors.white;
   ctx.font = font(50, 'bold');
 
   const displayedGuildName = trimText(ctx, guildName, 420);
-  ctx.fillText(`Gilde ${displayedGuildName}`, 56, 76);
+  ctx.fillText(`Gilde ${displayedGuildName}`, 56, 50);
 
   const guildNameWidth = ctx.measureText(displayedGuildName).width;
 
-  ctx.fillStyle = colors.black;
+  ctx.fillStyle = colors.white;
   ctx.font = font(30, 'bold');
-  ctx.fillText(`St. ${progress.level}`, 170 + guildNameWidth + 28, 77);
+  ctx.fillText(`St. ${progress.level}`, 170 + guildNameWidth + 28, 50);
 
   drawProgressBar(ctx, {
     x: 56,
-    y: 96,
+    y: 66,
     width: 800,
     height: 22,
     fillPercent: progressPercent,
@@ -224,50 +225,50 @@ async function renderCampImageBuffer(guildKey = null) {
   });
 
   // Linke Karten
-  drawCard(ctx, 56, 292, 200, 128, 18, colors.card);
-  drawCard(ctx, 56, 446, 200, 160, 18, colors.card);
+  drawCard(ctx, 45, 392, 300, 128, 18, colors.cardBlack);
+  drawCard(ctx, 45, 546, 300, 160, 18, colors.cardBlack);
 
   ctx.fillStyle = colors.gold;
-  ctx.font = font(18, 'bold');
-  ctx.fillText('Camp-Daten', 76, 315);
+  ctx.font = font(20, 'bold');
+  ctx.fillText('Camp-Daten', 76, 415);
 
-  drawLabelValue(ctx, 'Abenteurer', String(totals.players), 76, 345, 220, font, colors);
-  drawLabelValue(ctx, 'Gesamtbeitrag', String(totals.contribution), 76, 377, 220, font, colors);
-  drawLabelValue(ctx, 'Gesamt-XP', String(totals.xp), 76, 409, 220, font, colors);
+  drawLabelValue(ctx, 'Abenteurer', String(totals.players), 76, 445, 320, font, colors);
+  drawLabelValue(ctx, 'Gesamtbeitrag', String(totals.contribution), 76, 477, 320, font, colors);
+  drawLabelValue(ctx, 'Gesamt-XP', String(totals.xp), 76, 509, 320, font, colors);
 
   ctx.fillStyle = colors.gold;
-  ctx.font = font(18, 'bold');
-  ctx.fillText('Freigeschaltet', 76, 480);
+  ctx.font = font(20, 'bold');
+  ctx.fillText('Freigeschaltet', 76, 580);
 
-  ctx.font = font(17, 'normal');
-  ctx.fillStyle = colors.black;
+  ctx.font = font(20, 'normal');
+  ctx.fillStyle = colors.white;
   getUnlockedFeatures(progress.level).forEach((feature, index) => {
-    ctx.fillText(`• ${feature}`, 76, 515 + (index * 30));
+    ctx.fillText(`${feature}`, 76, 615 + (index * 30));
   });
 
   // Rechte Spalte
-  drawCard(ctx, 1000, 44, 460, 350, 20, colors.card);
-  drawCard(ctx, 1000, 430, 460, 180, 20, colors.cardStrong);
+  drawCard(ctx, 900, 64, 330, 300, 20, colors.cardBlack);
+  drawCard(ctx, 770, 430, 360, 180, 20, colors.cardBlack);
 
-  ctx.fillStyle = colors.black;
+  ctx.fillStyle = colors.gold;
   ctx.font = font(24, 'bold');
-  ctx.fillText('Top-Beiträger', 1000, 82);
+  ctx.fillText('Top-Beiträger', 920, 122);
 
   topContributors.forEach((player, index) => {
     const medal = index === 0 ? '🥇' : index === 1 ? '🥈' : '🥉';
-    const y = 132 + (index * 86);
+    const y = 172 + (index * 86);
 
     ctx.fillStyle = colors.gold;
     ctx.font = font(22, 'bold');
-    ctx.fillText(medal, 1000, y);
+    ctx.fillText(medal, 920, y);
 
-    ctx.fillStyle = colors.black;
-    ctx.font = font(24, 'bold');
-    ctx.fillText(`#${index + 1}` + ` ` + trimText(ctx, player.discord_username, 300) , 1025, y);
+    ctx.fillStyle = colors.white;
+    ctx.font = font(24, 'normal');
+    ctx.fillText(`#${index + 1}` + ` ` + trimText(ctx, player.discord_username, 300) , 945, y);
 
     ctx.fillStyle = colors.gold;
     ctx.font = font(15, 'bold');
-    ctx.fillText(`Gesamtbeitrag: ${player.contribution}`, 1060, y + 20);
+    ctx.fillText(`Gesamtbeitrag: ${player.contribution}`, 980, y + 20);
   });
 
   ctx.fillStyle = colors.gold;
@@ -277,11 +278,11 @@ async function renderCampImageBuffer(guildKey = null) {
   if (topContributor24h) {
     const starter = getStarterConfig(topContributor24h.pokemon_key);
 
-    ctx.fillStyle = colors.black;
+    ctx.fillStyle = colors.white;
     ctx.font = font(24, 'bold');
     ctx.fillText(trimText(ctx, topContributor24h.discord_username, 240), 790, 512);
 
-    ctx.fillStyle = colors.black;
+    ctx.fillStyle = colors.white;
     ctx.font = font(15, 'normal');
     ctx.fillText(
       `Partner: ${starter?.name || topContributor24h.pokemon_key || 'Unbekannt'}`,
@@ -289,8 +290,8 @@ async function renderCampImageBuffer(guildKey = null) {
       540
     );
 
-    drawMiniStat(ctx, '+Beitrag', `+${topContributor24h.contribution_24h}`, 760, 560, 170, font, colors);
-    drawMiniStat(ctx, '+XP', `+${topContributor24h.xp_24h || 0}`, 950, 560, 170, font, colors);
+    drawMiniStat(ctx, '+Beitrag', `+${topContributor24h.contribution_24h}`, 780, 560, 170, font, colors.white);
+    drawMiniStat(ctx, '+XP', `+${topContributor24h.xp_24h || 0}`, 970, 560, 170, font, colors.white);
 
     const pokemonCardX = 1050;
     const pokemonCardY = 410;
@@ -391,14 +392,14 @@ function drawFallbackBackground(ctx, width, height, level) {
 }
 
 function drawOverlayPanel(ctx, width, height) {
-  ctx.fillStyle = 'rgba(15, 23, 42, 0.28)';
-  roundRect(ctx, 28, 28, 1224, 664, 24);
+  ctx.fillStyle = 'rgba(15, 23, 42, 0.48)';
+  roundRect(ctx, 40, 5, 850, 100, 24);
   ctx.fill();
 
 }
 
 function drawProgressBar(ctx, { x, y, width, height, fillPercent, label, fontFamily = 'sans-serif' }) {
-  ctx.fillStyle = 'rgba(255,255,255,0.16)';
+  ctx.fillStyle = 'rgba(255,255,255,0.36)';
   roundRect(ctx, x, y, width, height, 12);
   ctx.fill();
 
@@ -418,11 +419,11 @@ function drawCard(ctx, x, y, width, height, radius, fillStyle) {
 }
 
 function drawLabelValue(ctx, label, value, x, y, valueX, font, colors) {
-  ctx.fillStyle = colors.black;
-  ctx.font = font(15, 'normal');
+  ctx.fillStyle = colors.white;
+  ctx.font = font(20, 'normal');
   ctx.fillText(label, x, y);
 
-  ctx.fillStyle = colors.black;
+  ctx.fillStyle = colors.white;
   ctx.font = font(22, 'bold');
   const measured = ctx.measureText(value).width;
   ctx.fillText(value, valueX - measured, y);
@@ -433,11 +434,11 @@ function drawMiniStat(ctx, label, value, x, y, width, font, colors) {
   roundRect(ctx, x, y, width, 52, 14);
   ctx.fill();
 
-  ctx.fillStyle = colors.black;
+  ctx.fillStyle = colors;
   ctx.font = font(13, 'normal');
   ctx.fillText(label, x + 14, y + 18);
 
-  ctx.fillStyle = colors.black;
+  ctx.fillStyle = colors;
   ctx.font = font(22, 'bold');
   ctx.fillText(value, x + 14, y + 40);
 }
