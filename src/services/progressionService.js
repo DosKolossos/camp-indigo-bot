@@ -2,38 +2,47 @@ const starters = require('../config/starters');
 const starterGrowth = require('../config/starterGrowth');
 
 const PLAYER_LEVEL_THRESHOLDS = [
-  0,     // Level 1
-  20,    // Level 2
-  55,    // Level 3
-  105,   // Level 4
-  175,   // Level 5
-  270,   // Level 6
-  390,   // Level 7
-  540,   // Level 8
-  720,   // Level 9
-  935,   // Level 10
-  1190,  // Level 11
-  1490,  // Level 12
-  1840,  // Level 13
-  2245,  // Level 14
-  2710,  // Level 15
-  3240,  // Level 16
-  3840,  // Level 17
-  4515,  // Level 18
-  5270,  // Level 19
-  6110,  // Level 20
-  7040   // Level 21
+  0,
+  20,
+  55,
+  105,
+  175,
+  270,
+  390,
+  540,
+  720,
+  935,
+  1190,
+  1490,
+  1840,
+  2245,
+  2710,
+  3240,
+  3840,
+  4515,
+  5270,
+  6110,
+  7040
+];
+
+const CAMP_BUILD_THRESHOLDS = [
+  0,
+  40,
+  120
+];
+
+const CAMP_EXPLORATION_THRESHOLDS = [
+  0,
+  140,
+  380,
+  780,
+  1380,
+  2180
 ];
 
 const CAMP_LEVEL_THRESHOLDS = [
-  0,     // Stufe 1
-  40,    // Stufe 2
-  120,   // Stufe 3
-  260,   // Stufe 4
-  500,   // Stufe 5
-  900,   // Stufe 6
-  1500,  // Stufe 7
-  2300   // Stufe 8
+  ...CAMP_BUILD_THRESHOLDS,
+  ...CAMP_EXPLORATION_THRESHOLDS.slice(1)
 ];
 
 function getStarterByKey(key) {
@@ -91,16 +100,32 @@ function getXpProgress(xp) {
   };
 }
 
-function calculateCampLevelFromContribution(contribution) {
-  return getThresholdLevel(Math.max(0, Number(contribution) || 0), CAMP_LEVEL_THRESHOLDS);
+function normalizeCampInput(input) {
+  if (typeof input === 'number') {
+    return {
+      contribution: Math.max(0, Number(input) || 0),
+      explorationPoints: 0
+    };
+  }
+
+  return {
+    contribution: Math.max(0, Number(input?.contribution) || 0),
+    explorationPoints: Math.max(
+      0,
+      Number(input?.explorationPoints ?? input?.exploration_points) || 0
+    )
+  };
 }
 
-function getCampProgress(contribution) {
-  const safeContribution = Math.max(0, Number(contribution) || 0);
-  const level = calculateCampLevelFromContribution(safeContribution);
-  const levelIndex = level - 1;
-  const currentLevelStart = CAMP_LEVEL_THRESHOLDS[levelIndex] ?? 0;
-  const nextLevelTarget = CAMP_LEVEL_THRESHOLDS[levelIndex + 1] ?? null;
+function buildProgressPayload({
+  level,
+  currentLevelStart,
+  nextLevelTarget,
+  resourceValue,
+  progressionKey,
+  progressionLabel,
+  phaseLabel
+}) {
   const isMaxLevel = nextLevelTarget === null;
 
   if (isMaxLevel) {
@@ -108,11 +133,15 @@ function getCampProgress(contribution) {
       level,
       currentLevelStart,
       nextLevelTarget: null,
-      currentInLevel: safeContribution - currentLevelStart,
+      currentInLevel: resourceValue - currentLevelStart,
       neededForNextLevel: 0,
       remainingToNextLevel: 0,
       nextLevel: null,
-      isMaxLevel: true
+      isMaxLevel: true,
+      progressionKey,
+      progressionLabel,
+      phaseLabel,
+      resourceValue
     };
   }
 
@@ -120,11 +149,64 @@ function getCampProgress(contribution) {
     level,
     currentLevelStart,
     nextLevelTarget,
-    currentInLevel: safeContribution - currentLevelStart,
+    currentInLevel: resourceValue - currentLevelStart,
     neededForNextLevel: nextLevelTarget - currentLevelStart,
-    remainingToNextLevel: Math.max(0, nextLevelTarget - safeContribution),
+    remainingToNextLevel: Math.max(0, nextLevelTarget - resourceValue),
     nextLevel: level + 1,
-    isMaxLevel: false
+    isMaxLevel: false,
+    progressionKey,
+    progressionLabel,
+    phaseLabel,
+    resourceValue
+  };
+}
+
+function calculateCampLevelFromContribution(contribution) {
+  return getThresholdLevel(Math.max(0, Number(contribution) || 0), CAMP_BUILD_THRESHOLDS);
+}
+
+function getCampProgress(input) {
+  const { contribution, explorationPoints } = normalizeCampInput(input);
+  const buildLevel = calculateCampLevelFromContribution(contribution);
+
+  if (buildLevel < 3) {
+    const levelIndex = buildLevel - 1;
+    const currentLevelStart = CAMP_BUILD_THRESHOLDS[levelIndex] ?? 0;
+    const nextLevelTarget = CAMP_BUILD_THRESHOLDS[levelIndex + 1] ?? null;
+
+    return {
+      ...buildProgressPayload({
+        level: buildLevel,
+        currentLevelStart,
+        nextLevelTarget,
+        resourceValue: contribution,
+        progressionKey: 'contribution',
+        progressionLabel: 'Beitrag',
+        phaseLabel: 'Ausbau'
+      }),
+      contribution,
+      explorationPoints
+    };
+  }
+
+  const explorationStage = getThresholdLevel(explorationPoints, CAMP_EXPLORATION_THRESHOLDS);
+  const level = 2 + explorationStage;
+  const levelIndex = explorationStage - 1;
+  const currentLevelStart = CAMP_EXPLORATION_THRESHOLDS[levelIndex] ?? 0;
+  const nextLevelTarget = CAMP_EXPLORATION_THRESHOLDS[levelIndex + 1] ?? null;
+
+  return {
+    ...buildProgressPayload({
+      level,
+      currentLevelStart,
+      nextLevelTarget,
+      resourceValue: explorationPoints,
+      progressionKey: 'exploration_points',
+      progressionLabel: 'Erkundungspunkte',
+      phaseLabel: 'Gebietserkundung'
+    }),
+    contribution,
+    explorationPoints
   };
 }
 
@@ -162,6 +244,8 @@ function calculateScaledStats(pokemonKey, level) {
 module.exports = {
   PLAYER_LEVEL_THRESHOLDS,
   CAMP_LEVEL_THRESHOLDS,
+  CAMP_BUILD_THRESHOLDS,
+  CAMP_EXPLORATION_THRESHOLDS,
   calculateLevelFromXp,
   getXpProgress,
   calculateCampLevelFromContribution,

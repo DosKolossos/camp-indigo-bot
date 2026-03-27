@@ -38,6 +38,8 @@ db.exec(`
     food INTEGER NOT NULL DEFAULT 0,
     stone INTEGER NOT NULL DEFAULT 0,
     contribution INTEGER NOT NULL DEFAULT 0,
+    exploration_points INTEGER NOT NULL DEFAULT 0,
+    food_credit INTEGER NOT NULL DEFAULT 0,
     guild_role_id TEXT,
     sammeln_cooldown_until TEXT,
     arbeiten_cooldown_until TEXT,
@@ -61,6 +63,7 @@ db.exec(`
     discord_user_id TEXT NOT NULL,
     action_key TEXT,
     contribution_delta INTEGER NOT NULL DEFAULT 0,
+    exploration_points_delta INTEGER NOT NULL DEFAULT 0,
     xp_delta INTEGER NOT NULL DEFAULT 0,
     wood_delta INTEGER NOT NULL DEFAULT 0,
     food_delta INTEGER NOT NULL DEFAULT 0,
@@ -69,10 +72,14 @@ db.exec(`
   );
 `);
 
+ensureColumn('players', 'contribution', 'INTEGER NOT NULL DEFAULT 0');
+ensureColumn('players', 'exploration_points', 'INTEGER NOT NULL DEFAULT 0');
+ensureColumn('players', 'food_credit', 'INTEGER NOT NULL DEFAULT 0');
 ensureColumn('players', 'sammeln_cooldown_until', 'TEXT');
 ensureColumn('players', 'arbeiten_cooldown_until', 'TEXT');
 ensureColumn('players', 'trainieren_cooldown_until', 'TEXT');
 ensureColumn('players', 'busy_until', 'TEXT');
 ensureColumn('players', 'busy_activity', 'TEXT');
+ensureColumn('player_activity_log', 'exploration_points_delta', 'INTEGER NOT NULL DEFAULT 0');
 
 module.exports = db;

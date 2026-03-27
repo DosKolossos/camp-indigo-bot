@@ -3,6 +3,7 @@ const fs = require('fs');
 const { AttachmentBuilder, EmbedBuilder } = require('discord.js');
 const { getState, setState } = require('./stateService');
 const { allPlayers, getCampTotals, getTopContributorLast24Hours } = require('./playerService');
+const { getVillageFood } = require('./villageStorageService');
 const starters = require('../config/starters');
 const { getCampProgress } = require('./progressionService');
 const guilds = require('../config/guilds');
@@ -20,8 +21,8 @@ const CAMP_STATUS_MESSAGE_KEY = 'camp_status_message_id';
 const LEVEL_ASSET_DIR = path.join(__dirname, '..', 'assets', 'camp');
 const POKEMON_ASSET_DIR = path.join(__dirname, '..', 'assets', 'pokemon');
 
-function getCampTopContributors(limit = 5) {
-  return allPlayers()
+function getCampTopContributors(limit = 5, guildKey = null) {
+  return allPlayers(guildKey)
     .slice()
     .sort((a, b) => {
       const contributionDiff = (Number(b.contribution) || 0) - (Number(a.contribution) || 0);
@@ -97,19 +98,6 @@ function getPokemonAssetPath(pokemonKey) {
   return null;
 }
 
-function getGuildConfig(guildKey) {
-  return guilds.find(guild => guild.key === guildKey) || null;
-}
-
-function isGuildKey(value) {
-  return guilds.some(guild => guild.key === value);
-}
-
-function resolveProgressChannelId(guildKey) {
-  const guild = getGuildConfig(guildKey);
-  return guild?.progressChannelId || null;
-}
-
 function drawImageContain(ctx, image, x, y, width, height) {
   const scale = Math.min(width / image.width, height / image.height);
   const drawWidth = image.width * scale;
@@ -124,19 +112,23 @@ async function renderCampImageBuffer(guildKey = null) {
   if (!CanvasLib) return null;
 
   const { createCanvas, loadImage, GlobalFonts } = CanvasLib;
-  const totals = getCampTotals();
-  const progress = getCampProgress(totals.contribution);
-  const topContributors = getCampTopContributors(3);
+  const totals = getCampTotals(guildKey);
+  const progress = getCampProgress({
+    contribution: totals.contribution,
+    explorationPoints: totals.exploration_points
+  });
+  const topContributors = getCampTopContributors(3, guildKey);
   const width = 1280;
   const height = 720;
   const canvas = createCanvas(width, height);
-  const topContributor24h = getTopContributorLast24Hours();
+  const topContributor24h = getTopContributorLast24Hours(guildKey);
+  const villageFood = getVillageFood(guildKey);
   const ctx = canvas.getContext('2d');
-
   const guild = guildKey ? getGuildConfig(guildKey) : null;
   const guildName = guild?.name || guild?.guildName || guild?.title || 'Camp Gilde';
 
   let fontFamily = 'sans-serif';
+  let fontLoadedFrom = null;
 
   const fontCandidates = [
     path.join(process.cwd(), 'src', 'assets', 'camp', 'Inter-Regular.TTF'),
@@ -155,6 +147,7 @@ async function renderCampImageBuffer(guildKey = null) {
       try {
         GlobalFonts.registerFromPath(candidate, 'CampStatusSans');
         fontFamily = 'CampStatusSans';
+        fontLoadedFrom = candidate;
         break;
       } catch (_error) {
         // ignore duplicate registrations
@@ -162,20 +155,21 @@ async function renderCampImageBuffer(guildKey = null) {
     }
   }
 
+  console.log(`[camp-status] font family: ${fontFamily}`);
+  console.log(`[camp-status] font source: ${fontLoadedFrom || 'none'}`);
+
   const font = (size, weight = 'normal') => `${weight} ${size}px ${fontFamily}`;
 
   const colors = {
     white: '#f8fafc',
     soft: '#cbd5e1',
     muted: '#94a3b8',
-    black: '#000000',
     gold: '#fde68a',
     green: '#22c55e',
     blue: '#93c5fd',
     border: 'rgba(255,255,255,0.08)',
     panel: 'rgba(15, 23, 42, 0.78)',
     card: 'rgba(255,255,255,0.08)',
-    cardBlack: 'rgba(0,0,0,0.38)',
     cardStrong: 'rgba(255,255,255,0.12)'
   };
 
@@ -197,78 +191,92 @@ async function renderCampImageBuffer(guildKey = null) {
     ? 1
     : Math.max(0, Math.min(1, progress.currentInLevel / Math.max(1, progress.neededForNextLevel)));
 
+  const nextTarget = progress.nextLevelTarget ?? progress.resourceValue;
   const percentText = progress.isMaxLevel ? '100%' : `${Math.round(progressPercent * 100)}%`;
-
-  // Header
-  ctx.fillStyle = colors.white;
-  ctx.font = font(50, 'bold');
-
-  const displayedGuildName = trimText(ctx, guildName, 420);
-  ctx.fillText(`Gilde ${displayedGuildName}`, 56, 50);
-
-  const guildNameWidth = ctx.measureText(displayedGuildName).width;
+  const progressShortLabel = progress.progressionKey === 'contribution' ? 'Beitrag' : 'Erkundung';
 
   ctx.fillStyle = colors.white;
   ctx.font = font(30, 'bold');
-  ctx.fillText(`St. ${progress.level}`, 170 + guildNameWidth + 28, 50);
+  ctx.fillText(trimText(ctx, guildName, 320), 56, 76);
+
+  ctx.fillStyle = colors.soft;
+  ctx.font = font(18, 'bold');
+  ctx.fillText(`Camp-Stufe ${progress.level}`, 56, 110);
 
   drawProgressBar(ctx, {
     x: 56,
-    y: 66,
-    width: 800,
+    y: 146,
+    width: 430,
     height: 22,
     fillPercent: progressPercent,
     label: progress.isMaxLevel
       ? 'Max-Stufe erreicht'
-      : `${progress.currentInLevel}/${progress.neededForNextLevel} Beiträge bis Stufe ${progress.nextLevel} • ${percentText}`,
+      : `${progress.currentInLevel}/${progress.neededForNextLevel} ${progressShortLabel} bis Stufe ${progress.nextLevel}`,
     fontFamily
   });
 
-  // Linke Karten
-  drawCard(ctx, 45, 392, 300, 128, 18, colors.cardBlack);
-  drawCard(ctx, 45, 546, 300, 160, 18, colors.cardBlack);
+  ctx.fillStyle = colors.white;
+  ctx.font = font(24, 'bold');
+  ctx.fillText(`${progress.resourceValue} / ${nextTarget}`, 56, 220);
+
+  ctx.fillStyle = colors.soft;
+  ctx.font = font(16, 'normal');
+  ctx.fillText(
+    progress.isMaxLevel
+      ? 'Maximale Camp-Stufe erreicht'
+      : `Noch ${progress.remainingToNextLevel} ${progress.progressionLabel} bis Stufe ${progress.nextLevel} • ${percentText}`,
+    56,
+    250
+  );
+
+  drawCard(ctx, 56, 292, 430, 156, 18, colors.card);
+  drawCard(ctx, 56, 470, 430, 136, 18, colors.card);
 
   ctx.fillStyle = colors.gold;
-  ctx.font = font(20, 'bold');
-  ctx.fillText('Camp-Daten', 76, 415);
+  ctx.font = font(18, 'bold');
+  ctx.fillText('Camp-Daten', 76, 316);
 
-  drawLabelValue(ctx, 'Abenteurer', String(totals.players), 76, 445, 320, font, colors);
-  drawLabelValue(ctx, 'Gesamtbeitrag', String(totals.contribution), 76, 477, 320, font, colors);
-  drawLabelValue(ctx, 'Gesamt-XP', String(totals.xp), 76, 509, 320, font, colors);
+  drawLabelValue(ctx, 'Abenteurer', String(totals.players), 76, 345, 456, font, colors);
+  drawLabelValue(ctx, 'Baufortschritt', String(totals.contribution), 76, 377, 456, font, colors);
+  drawLabelValue(ctx, 'Erkundung', String(totals.exploration_points), 76, 409, 456, font, colors);
+  drawLabelValue(ctx, 'Dorfkammer', String(villageFood), 76, 441, 456, font, colors);
 
   ctx.fillStyle = colors.gold;
-  ctx.font = font(20, 'bold');
-  ctx.fillText('Freigeschaltet', 76, 580);
+  ctx.font = font(18, 'bold');
+  ctx.fillText('Freigeschaltet', 76, 500);
 
-  ctx.font = font(20, 'normal');
+  ctx.font = font(17, 'normal');
   ctx.fillStyle = colors.white;
   getUnlockedFeatures(progress.level).forEach((feature, index) => {
-    ctx.fillText(`${feature}`, 76, 615 + (index * 30));
+    ctx.fillText(`• ${feature}`, 76, 535 + (index * 26));
   });
 
-  // Rechte Spalte
-  drawCard(ctx, 900, 64, 330, 300, 20, colors.cardBlack);
-  drawCard(ctx, 770, 430, 360, 180, 20, colors.cardBlack);
+  drawCard(ctx, 760, 44, 460, 350, 20, colors.card);
+  drawCard(ctx, 760, 430, 460, 180, 20, colors.cardStrong);
 
   ctx.fillStyle = colors.gold;
   ctx.font = font(24, 'bold');
-  ctx.fillText('Top-Beiträger', 920, 122);
+  ctx.fillText('Top-Beiträger', 790, 82);
 
   topContributors.forEach((player, index) => {
     const medal = index === 0 ? '🥇' : index === 1 ? '🥈' : '🥉';
-    const y = 172 + (index * 86);
+    const y = 132 + (index * 86);
 
     ctx.fillStyle = colors.gold;
     ctx.font = font(22, 'bold');
-    ctx.fillText(medal, 920, y);
+    ctx.fillText(medal, 792, y);
 
     ctx.fillStyle = colors.white;
-    ctx.font = font(24, 'normal');
-    ctx.fillText(`#${index + 1}` + ` ` + trimText(ctx, player.discord_username, 300) , 945, y);
+    ctx.font = font(24, 'bold');
+    ctx.fillText(trimText(ctx, player.discord_username, 300), 842, y);
+
+    ctx.fillStyle = colors.soft;
+    ctx.font = font(16, 'normal');
+    ctx.fillText(`Platz ${index + 1}`, 842, y + 24);
 
     ctx.fillStyle = colors.gold;
-    ctx.font = font(15, 'bold');
-    ctx.fillText(`Gesamtbeitrag: ${player.contribution}`, 980, y + 20);
+    ctx.font = font(20, 'bold');
+    ctx.fillText(`Gesamtbeitrag: ${player.contribution}`, 842, y + 52);
   });
 
   ctx.fillStyle = colors.gold;
@@ -282,7 +290,7 @@ async function renderCampImageBuffer(guildKey = null) {
     ctx.font = font(24, 'bold');
     ctx.fillText(trimText(ctx, topContributor24h.discord_username, 240), 790, 512);
 
-    ctx.fillStyle = colors.white;
+    ctx.fillStyle = colors.soft;
     ctx.font = font(15, 'normal');
     ctx.fillText(
       `Partner: ${starter?.name || topContributor24h.pokemon_key || 'Unbekannt'}`,
@@ -290,8 +298,8 @@ async function renderCampImageBuffer(guildKey = null) {
       540
     );
 
-    drawMiniStat(ctx, '+Beitrag', `+${topContributor24h.contribution_24h}`, 780, 560, 170, font, colors.white);
-    drawMiniStat(ctx, '+XP', `+${topContributor24h.xp_24h || 0}`, 970, 560, 170, font, colors.white);
+    drawMiniStat(ctx, '+Beitrag', `+${topContributor24h.contribution_24h}`, 760, 560, 170, font, colors);
+    drawMiniStat(ctx, '+XP', `+${topContributor24h.xp_24h || 0}`, 950, 560, 170, font, colors);
 
     const pokemonCardX = 1050;
     const pokemonCardY = 410;
@@ -307,17 +315,17 @@ async function renderCampImageBuffer(guildKey = null) {
         const pokemonImage = await loadImage(pokemonAssetPath);
         drawImageContain(ctx, pokemonImage, pokemonCardX, pokemonCardY, pokemonCardW, pokemonCardH);
       } catch (_error) {
-        ctx.fillStyle = colors.black;
+        ctx.fillStyle = colors.soft;
         ctx.font = font(14, 'normal');
         ctx.fillText('Bild konnte nicht geladen werden', pokemonCardX + 14, pokemonCardY + 68);
       }
     } else {
-      ctx.fillStyle = colors.black;
+      ctx.fillStyle = colors.soft;
       ctx.font = font(14, 'normal');
       ctx.fillText('Kein Pokémon-Bild gefunden', pokemonCardX + 14, pokemonCardY + 68);
     }
   } else {
-    ctx.fillStyle = colors.black;
+    ctx.fillStyle = colors.soft;
     ctx.font = font(18, 'normal');
     ctx.fillText('Noch keine Aktivität in den letzten 24h.', 790, 512);
   }
@@ -350,12 +358,10 @@ function drawFallbackBackground(ctx, width, height, level) {
     ctx.arc(x, 110, 24, 0, Math.PI * 2);
     ctx.fill();
   }
-
   for (let y = 120; y <= 560; y += 52) {
     ctx.beginPath();
     ctx.arc(228, y, 22, 0, Math.PI * 2);
     ctx.fill();
-
     ctx.beginPath();
     ctx.arc(748, y, 22, 0, Math.PI * 2);
     ctx.fill();
@@ -392,14 +398,17 @@ function drawFallbackBackground(ctx, width, height, level) {
 }
 
 function drawOverlayPanel(ctx, width, height) {
-  ctx.fillStyle = 'rgba(15, 23, 42, 0.48)';
-  roundRect(ctx, 40, 5, 850, 100, 24);
+  ctx.fillStyle = 'rgba(15, 23, 42, 0.78)';
+  roundRect(ctx, 28, 28, 1224, 664, 24);
   ctx.fill();
 
+  ctx.fillStyle = 'rgba(255,255,255,0.08)';
+  roundRect(ctx, 740, 28, 512, 664, 24);
+  ctx.fill();
 }
 
 function drawProgressBar(ctx, { x, y, width, height, fillPercent, label, fontFamily = 'sans-serif' }) {
-  ctx.fillStyle = 'rgba(255,255,255,0.36)';
+  ctx.fillStyle = 'rgba(255,255,255,0.16)';
   roundRect(ctx, x, y, width, height, 12);
   ctx.fill();
 
@@ -408,8 +417,8 @@ function drawProgressBar(ctx, { x, y, width, height, fillPercent, label, fontFam
   ctx.fill();
 
   ctx.font = `16px ${fontFamily}`;
-  ctx.fillStyle = '#000000';
-  ctx.fillText(label, x + 3, y + height - 6);
+  ctx.fillStyle = '#dbeafe';
+  ctx.fillText(label, x, y + height + 24);
 }
 
 function drawCard(ctx, x, y, width, height, radius, fillStyle) {
@@ -419,8 +428,8 @@ function drawCard(ctx, x, y, width, height, radius, fillStyle) {
 }
 
 function drawLabelValue(ctx, label, value, x, y, valueX, font, colors) {
-  ctx.fillStyle = colors.white;
-  ctx.font = font(20, 'normal');
+  ctx.fillStyle = colors.soft;
+  ctx.font = font(15, 'normal');
   ctx.fillText(label, x, y);
 
   ctx.fillStyle = colors.white;
@@ -434,11 +443,11 @@ function drawMiniStat(ctx, label, value, x, y, width, font, colors) {
   roundRect(ctx, x, y, width, 52, 14);
   ctx.fill();
 
-  ctx.fillStyle = colors;
+  ctx.fillStyle = colors.soft;
   ctx.font = font(13, 'normal');
   ctx.fillText(label, x + 14, y + 18);
 
-  ctx.fillStyle = colors;
+  ctx.fillStyle = colors.white;
   ctx.font = font(22, 'bold');
   ctx.fillText(value, x + 14, y + 40);
 }
@@ -455,20 +464,44 @@ function roundRect(ctx, x, y, width, height, radius) {
 }
 
 async function buildCampStatusPayload(guildKey = null) {
-  const totals = getCampTotals();
-  const progress = getCampProgress(totals.contribution);
-  const topContributors = getCampTopContributors(5);
+  const totals = getCampTotals(guildKey);
+  const progress = getCampProgress({
+    contribution: totals.contribution,
+    explorationPoints: totals.exploration_points
+  });
+  const topContributors = getCampTopContributors(5, guildKey);
   const contributorsText = buildTopContributorText(topContributors);
+  const villageFood = getVillageFood(guildKey);
+  const guild = guildKey ? getGuildConfig(guildKey) : null;
+  const guildName = guild?.name || guild?.guildName || guild?.title || 'Camp Gilde';
+
+  const progressText = progress.isMaxLevel
+    ? 'Max-Stufe erreicht'
+    : `${progress.currentInLevel}/${progress.neededForNextLevel} ${progress.progressionLabel} bis Stufe ${progress.nextLevel}`;
 
   const embed = new EmbedBuilder()
-    .setTitle(CAMP_STATUS_TITLE)
+    .setTitle(`${CAMP_STATUS_TITLE} – ${guildName}`)
     .setDescription(
-      `**Camp-Stufe:** ${progress.level}\n` +
-      `**Gesamtbeitrag:** ${totals.contribution}\n` +
-      `**Abenteurer:** ${totals.players}\n\n` +
-      `**Top-Beiträger**\n${contributorsText}`
+      `**Camp-Stufe:** ${progress.level}
+` +
+      `**Phase:** ${progress.phaseLabel}
+` +
+      `**Fortschritt:** ${progressText}
+
+` +
+      `**Baufortschritt:** ${totals.contribution}
+` +
+      `**Erkundungspunkte:** ${totals.exploration_points}
+` +
+      `**Dorfkammer:** ${villageFood}
+` +
+      `**Abenteurer:** ${totals.players}
+
+` +
+      `**Top-Beiträger**
+${contributorsText}`
     )
-    .setColor(0x2ecc71)
+    .setColor(guild?.color ?? 0x2ecc71)
     .setFooter({ text: 'Eine feste Nachricht – wird automatisch aktualisiert.' });
 
   const buffer = await renderCampImageBuffer(guildKey);
@@ -476,7 +509,7 @@ async function buildCampStatusPayload(guildKey = null) {
     return { embeds: [embed], components: [] };
   }
 
-  const fileName = `camp-status-${progress.level}-${totals.contribution}-${Date.now()}.png`;
+  const fileName = `camp-status-${guildKey || 'global'}-${progress.level}-${progress.resourceValue}-${Date.now()}.png`;
   const attachment = new AttachmentBuilder(buffer, { name: fileName });
   embed.setImage(`attachment://${fileName}`);
 
@@ -486,6 +519,19 @@ async function buildCampStatusPayload(guildKey = null) {
     attachments: [],
     components: []
   };
+}
+
+function getGuildConfig(guildKey) {
+  return guilds.find(guild => guild.key === guildKey) || null;
+}
+
+function isGuildKey(value) {
+  return guilds.some(guild => guild.key === value);
+}
+
+function resolveProgressChannelId(guildKey) {
+  const guild = getGuildConfig(guildKey);
+  return guild?.progressChannelId || null;
 }
 
 async function findExistingCampStatusMessage(client, guildKey = null) {
@@ -521,7 +567,7 @@ async function findCampStatusMessageByScan(channel) {
     const firstEmbed = message.embeds?.[0];
     if (
       message.author?.id === channel.client.user?.id &&
-      firstEmbed?.title === CAMP_STATUS_TITLE
+      firstEmbed?.title?.startsWith(CAMP_STATUS_TITLE)
     ) {
       return { channel, message };
     }
@@ -529,7 +575,6 @@ async function findCampStatusMessageByScan(channel) {
 
   return null;
 }
-
 async function ensureCampStatusMessage(client, guildKeyOrChannelId, explicitTargetChannelId = null) {
   const guildMode = isGuildKey(guildKeyOrChannelId);
   const guildKey = guildMode ? guildKeyOrChannelId : null;
@@ -587,7 +632,7 @@ async function ensureCampStatusMessage(client, guildKeyOrChannelId, explicitTarg
 async function syncCampStatusMessage(client, guildKey) {
   if (!guildKey) return null;
 
-  return await ensureCampStatusMessage(client, guildKey).catch(error => {
+  return ensureCampStatusMessage(client, guildKey).catch(error => {
     console.error(`Camp-Status für Gilde "${guildKey}" konnte nicht synchronisiert werden:`, error);
     return null;
   });

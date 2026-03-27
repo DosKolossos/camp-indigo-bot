@@ -25,6 +25,8 @@ function seedPreviewDb() {
       food INTEGER NOT NULL DEFAULT 0,
       stone INTEGER NOT NULL DEFAULT 0,
       contribution INTEGER NOT NULL DEFAULT 0,
+      exploration_points INTEGER NOT NULL DEFAULT 0,
+      food_credit INTEGER NOT NULL DEFAULT 0,
       guild_role_id TEXT,
       sammeln_cooldown_until TEXT,
       arbeiten_cooldown_until TEXT,
@@ -40,6 +42,7 @@ function seedPreviewDb() {
       discord_user_id TEXT NOT NULL,
       action_key TEXT,
       contribution_delta INTEGER NOT NULL DEFAULT 0,
+      exploration_points_delta INTEGER NOT NULL DEFAULT 0,
       xp_delta INTEGER NOT NULL DEFAULT 0,
       wood_delta INTEGER NOT NULL DEFAULT 0,
       food_delta INTEGER NOT NULL DEFAULT 0,
@@ -56,9 +59,9 @@ function seedPreviewDb() {
   db.prepare(`
     INSERT INTO players (
       discord_user_id, discord_username, pokemon_key, guild_key,
-      level, xp, wood, food, stone, contribution,
+      level, xp, wood, food, stone, contribution, exploration_points, food_credit,
       created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     'preview-user-1',
     'DosKolossos',
@@ -69,21 +72,23 @@ function seedPreviewDb() {
     12,
     8,
     6,
-    89,
+    120,
+    92,
+    4,
     now,
     now
   );
 
   const insertLog = db.prepare(`
     INSERT INTO player_activity_log (
-      discord_user_id, action_key, contribution_delta, xp_delta, wood_delta, food_delta, stone_delta, created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      discord_user_id, action_key, contribution_delta, exploration_points_delta, xp_delta, wood_delta, food_delta, stone_delta, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
-  insertLog.run('preview-user-1', 'arbeiten', 20, 40, 1, 0, 1, new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString());
-  insertLog.run('preview-user-1', 'arbeiten', 18, 52, 0, 0, 1, new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString());
-  insertLog.run('preview-user-1', 'sammeln', 0, 54, 2, 2, 1, new Date(Date.now() - 10 * 60 * 60 * 1000).toISOString());
-  insertLog.run('preview-user-1', 'arbeiten', 18, 0, 0, 0, 0, new Date(Date.now() - 14 * 60 * 60 * 1000).toISOString());
+  insertLog.run('preview-user-1', 'arbeiten', 20, 0, 40, 1, 0, 1, new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString());
+  insertLog.run('preview-user-1', 'erkunden', 0, 18, 18, 1, 1, 0, new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString());
+  insertLog.run('preview-user-1', 'sammeln', 0, 0, 12, 2, 2, 1, new Date(Date.now() - 10 * 60 * 60 * 1000).toISOString());
+  insertLog.run('preview-user-1', 'erkunden', 0, 14, 10, 0, 1, 1, new Date(Date.now() - 14 * 60 * 60 * 1000).toISOString());
 
   db.close();
 }

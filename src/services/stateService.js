@@ -16,4 +16,21 @@ function setState(key, value) {
   `).run(key, String(value), now);
 }
 
-module.exports = { getState, setState };
+function getNumericState(key, fallback = 0) {
+  const rawValue = getState(key);
+  const numericValue = Number(rawValue);
+  return Number.isFinite(numericValue) ? numericValue : fallback;
+}
+
+function incrementState(key, delta) {
+  const nextValue = Math.max(0, getNumericState(key, 0) + (Number(delta) || 0));
+  setState(key, nextValue);
+  return nextValue;
+}
+
+module.exports = {
+  getState,
+  setState,
+  getNumericState,
+  incrementState
+};

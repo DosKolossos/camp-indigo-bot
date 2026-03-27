@@ -34,9 +34,7 @@ function normalizeGuild(input, fallback = {}) {
     emoji,
     description,
     color: normalizeColor(input?.color, normalizeColor(fallback.color, 0x5865f2)),
-    roleName,
-    chatChannelId: input?.chatChannelId ?? input?.chat_channel_id ?? fallback.chatChannelId ?? null,
-    progressChannelId: input?.progressChannelId ?? input?.progress_channel_id ?? fallback.progressChannelId ?? null
+    roleName
   };
 }
 

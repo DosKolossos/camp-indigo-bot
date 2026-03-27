@@ -19,6 +19,8 @@ function ensurePlayerColumn(name, definition) {
 ensurePlayerColumn('trainieren_cooldown_until', 'TEXT');
 ensurePlayerColumn('busy_until', 'TEXT');
 ensurePlayerColumn('busy_activity', 'TEXT');
+ensurePlayerColumn('exploration_points', 'INTEGER NOT NULL DEFAULT 0');
+ensurePlayerColumn('food_credit', 'INTEGER NOT NULL DEFAULT 0');
 
 function getPlayerByDiscordUserId(discordUserId) {
   return db.prepare(`
@@ -54,8 +56,17 @@ function createPlayer({ discordUserId, discordUsername, pokemonKey, guildKey, gu
   return getPlayerById(result.lastInsertRowid);
 }
 
-function allPlayers() {
-  return db.prepare(`SELECT * FROM players ORDER BY created_at ASC`).all();
+function allPlayers(guildKey = null) {
+  if (!guildKey) {
+    return db.prepare(`SELECT * FROM players ORDER BY created_at ASC`).all();
+  }
+
+  return db.prepare(`
+    SELECT *
+    FROM players
+    WHERE guild_key = ?
+    ORDER BY created_at ASC
+  `).all(guildKey);
 }
 
 function updatePlayerProgress(discordUserId, changes = {}) {
@@ -63,28 +74,38 @@ function updatePlayerProgress(discordUserId, changes = {}) {
   const values = [];
 
   if (typeof changes.xp === 'number') {
-    fields.push('xp = xp + ?');
+    fields.push('xp = MAX(0, xp + ?)');
     values.push(changes.xp);
   }
 
   if (typeof changes.wood === 'number') {
-    fields.push('wood = wood + ?');
+    fields.push('wood = MAX(0, wood + ?)');
     values.push(changes.wood);
   }
 
   if (typeof changes.food === 'number') {
-    fields.push('food = food + ?');
+    fields.push('food = MAX(0, food + ?)');
     values.push(changes.food);
   }
 
   if (typeof changes.stone === 'number') {
-    fields.push('stone = stone + ?');
+    fields.push('stone = MAX(0, stone + ?)');
     values.push(changes.stone);
   }
 
   if (typeof changes.contribution === 'number') {
-    fields.push('contribution = contribution + ?');
+    fields.push('contribution = MAX(0, contribution + ?)');
     values.push(changes.contribution);
+  }
+
+  if (typeof changes.exploration_points === 'number') {
+    fields.push('exploration_points = MAX(0, exploration_points + ?)');
+    values.push(changes.exploration_points);
+  }
+
+  if (typeof changes.food_credit === 'number') {
+    fields.push('food_credit = MAX(0, food_credit + ?)');
+    values.push(changes.food_credit);
   }
 
   fields.push('updated_at = ?');
@@ -119,17 +140,22 @@ function refreshPlayerLevel(discordUserId) {
   return player;
 }
 
-function getCampTotals() {
-  return db.prepare(`
+function getCampTotals(guildKey = null) {
+  const sql = `
     SELECT
       COUNT(*) as players,
       COALESCE(SUM(wood), 0) as wood,
       COALESCE(SUM(food), 0) as food,
       COALESCE(SUM(stone), 0) as stone,
       COALESCE(SUM(contribution), 0) as contribution,
+      COALESCE(SUM(exploration_points), 0) as exploration_points,
+      COALESCE(SUM(food_credit), 0) as food_credit,
       COALESCE(SUM(xp), 0) as xp
     FROM players
-  `).get();
+    ${guildKey ? 'WHERE guild_key = ?' : ''}
+  `;
+
+  return guildKey ? db.prepare(sql).get(guildKey) : db.prepare(sql).get();
 }
 
 function getCooldownField(actionKey) {
@@ -223,6 +249,12 @@ function updatePlayerAdmin(id, payload = {}) {
   nextPlayer.food = Number.isFinite(Number(nextPlayer.food)) ? Math.max(0, Number(nextPlayer.food)) : currentPlayer.food;
   nextPlayer.stone = Number.isFinite(Number(nextPlayer.stone)) ? Math.max(0, Number(nextPlayer.stone)) : currentPlayer.stone;
   nextPlayer.contribution = Number.isFinite(Number(nextPlayer.contribution)) ? Math.max(0, Number(nextPlayer.contribution)) : currentPlayer.contribution;
+  nextPlayer.exploration_points = Number.isFinite(Number(nextPlayer.exploration_points))
+    ? Math.max(0, Number(nextPlayer.exploration_points))
+    : currentPlayer.exploration_points;
+  nextPlayer.food_credit = Number.isFinite(Number(nextPlayer.food_credit))
+    ? Math.max(0, Number(nextPlayer.food_credit))
+    : currentPlayer.food_credit;
 
   const now = new Date().toISOString();
 
@@ -237,8 +269,13 @@ function updatePlayerAdmin(id, payload = {}) {
         food = ?,
         stone = ?,
         contribution = ?,
+        exploration_points = ?,
+        food_credit = ?,
         sammeln_cooldown_until = ?,
         arbeiten_cooldown_until = ?,
+        trainieren_cooldown_until = ?,
+        busy_until = ?,
+        busy_activity = ?,
         updated_at = ?
     WHERE id = ?
   `).run(
@@ -251,8 +288,13 @@ function updatePlayerAdmin(id, payload = {}) {
     nextPlayer.food,
     nextPlayer.stone,
     nextPlayer.contribution,
+    nextPlayer.exploration_points,
+    nextPlayer.food_credit,
     normalizeNullableDate(nextPlayer.sammeln_cooldown_until),
     normalizeNullableDate(nextPlayer.arbeiten_cooldown_until),
+    normalizeNullableDate(nextPlayer.trainieren_cooldown_until),
+    normalizeNullableDate(nextPlayer.busy_until),
+    nextPlayer.busy_activity || null,
     now,
     id
   );
@@ -276,17 +318,19 @@ function logPlayerActivity(discordUserId, actionKey, changes = {}) {
       discord_user_id,
       action_key,
       contribution_delta,
+      exploration_points_delta,
       xp_delta,
       wood_delta,
       food_delta,
       stone_delta,
       created_at
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     discordUserId,
     actionKey || null,
     Number(changes.contribution) || 0,
+    Number(changes.exploration_points) || 0,
     Number(changes.xp) || 0,
     Number(changes.wood) || 0,
     Number(changes.food) || 0,
@@ -295,10 +339,10 @@ function logPlayerActivity(discordUserId, actionKey, changes = {}) {
   );
 }
 
-function getTopContributorLast24Hours() {
+function getTopContributorLast24Hours(guildKey = null) {
   const since = new Date(Date.now() - (24 * 60 * 60 * 1000)).toISOString();
 
-  return db.prepare(`
+  const sql = `
     SELECT
       p.discord_user_id,
       p.discord_username,
@@ -310,11 +354,16 @@ function getTopContributorLast24Hours() {
     JOIN players p
       ON p.discord_user_id = l.discord_user_id
     WHERE l.created_at >= ?
+      ${guildKey ? 'AND p.guild_key = ?' : ''}
     GROUP BY p.discord_user_id, p.discord_username, p.guild_key, p.pokemon_key
     HAVING contribution_24h > 0 OR xp_24h > 0
     ORDER BY contribution_24h DESC, xp_24h DESC, p.discord_username ASC
     LIMIT 1
-  `).get(since);
+  `;
+
+  return guildKey
+    ? db.prepare(sql).get(since, guildKey)
+    : db.prepare(sql).get(since);
 }
 
 module.exports = {

@@ -13,10 +13,12 @@ const {
   getPlayerByDiscordUserId,
   getCampTotals,
   setActionCooldown,
+  setBusyState,
   logPlayerActivity
 } = require('../services/playerService');
 const { applyProgressWithLevelUpAnnouncement } = require('../services/levelUpService');
 const { syncCampStatusMessage } = require('../services/campStatusService');
+const { getVillageFood, depositVillageFood } = require('../services/villageStorageService');
 const {
   getXpProgress,
   getCampProgress,
@@ -26,8 +28,10 @@ const {
 const SAMMELN_COOLDOWN_MS = parseDurationMs(process.env.SAMMELN_COOLDOWN_MINUTES, 10 * 60 * 1000, 60 * 1000);
 const ARBEITEN_COOLDOWN_MS = parseDurationMs(process.env.ARBEITEN_COOLDOWN_MINUTES, 8 * 60 * 1000, 60 * 1000);
 const TRAINIEREN_COOLDOWN_MS = parseDurationMs(process.env.TRAINIEREN_COOLDOWN_MINUTES, 12 * 60 * 1000, 60 * 1000);
+const ERKUNDEN_BUSY_MS = parseDurationMs(process.env.ERKUNDEN_BUSY_MINUTES, 60 * 60 * 1000, 60 * 1000);
 
 const TRAINIEREN_UNLOCK_CAMP_LEVEL = 2;
+const ERKUNDEN_UNLOCK_CAMP_LEVEL = 3;
 
 function parseDurationMs(envValue, fallback, multiplier = 1) {
   const numericValue = Number(envValue);
@@ -188,11 +192,14 @@ function getActionStatus(player) {
   };
 }
 
-function getCampState() {
-  const totals = getCampTotals();
-  const progress = getCampProgress(totals.contribution);
+function getCampState(guildKey = null) {
+  const totals = getCampTotals(guildKey);
+  const progress = getCampProgress({
+    contribution: totals.contribution,
+    explorationPoints: totals.exploration_points
+  });
 
-  return { totals, progress };
+  return { totals, progress, villageFood: getVillageFood(guildKey) };
 }
 
 function buildLockedPayload(title, description) {
@@ -243,9 +250,10 @@ function buildActionMenu(player) {
   const guild = getGuild(player.guild_key);
   const cooldowns = getActionStatus(player);
   const busy = getBusyStatus(player);
-  const camp = getCampState().progress;
+  const camp = getCampState(player.guild_key).progress;
 
   const trainingUnlocked = camp.level >= TRAINIEREN_UNLOCK_CAMP_LEVEL;
+  const exploringUnlocked = camp.level >= ERKUNDEN_UNLOCK_CAMP_LEVEL;
   const trainingDescription = busy.isBusy
     ? `Gesperrt: Du bist auf ${getBusyActivityLabel(busy.activityKey)}`
     : !trainingUnlocked
@@ -253,6 +261,18 @@ function buildActionMenu(player) {
       : cooldowns.trainierenRemaining > 0
         ? `Wieder bereit in ${formatRemaining(cooldowns.trainierenRemaining)}`
         : 'Steigere deine Werte über XP';
+
+  const exploringDescription = busy.isBusy
+    ? `Gesperrt: Du bist auf ${getBusyActivityLabel(busy.activityKey)}`
+    : !exploringUnlocked
+      ? `Freischaltung ab Camp-Stufe ${ERKUNDEN_UNLOCK_CAMP_LEVEL}`
+      : `1 Stunde unterwegs · ${camp.progressionLabel} + kleine Funde`;
+
+  const foodBankDescription = busy.isBusy
+    ? `Gesperrt: Du bist auf ${getBusyActivityLabel(busy.activityKey)}`
+    : player.food > 0
+      ? `Lege deine Nahrung in die Dorfkammer ein (${player.food} dabei)`
+      : 'Du hast aktuell keine Nahrung zum Einlagern';
 
   const embed = new EmbedBuilder()
     .setTitle('🎮 Deine Aktionen')
@@ -265,8 +285,13 @@ function buildActionMenu(player) {
       `**Status**\n` +
       `${busy.label}\n` +
       `${cooldowns.sammelnLabel}\n` +
-      `${cooldowns.arbeitenLabel}\n` +
-      `${trainingUnlocked ? cooldowns.trainierenLabel : `🔒 Trainieren ab Camp-Stufe ${TRAINIEREN_UNLOCK_CAMP_LEVEL}`}\n\n` +
+      `${cooldowns.arbeitenLabel}
+` +
+      `${trainingUnlocked ? cooldowns.trainierenLabel : `🔒 Trainieren ab Camp-Stufe ${TRAINIEREN_UNLOCK_CAMP_LEVEL}`}
+` +
+      `${exploringUnlocked ? '🧭 Erkunden ist bereit' : `🔒 Erkunden ab Camp-Stufe ${ERKUNDEN_UNLOCK_CAMP_LEVEL}`}
+
+` +
       'Wähle deine nächste Aktion.'
     )
     .setFooter({
@@ -311,6 +336,18 @@ function buildActionMenu(player) {
         emoji: '💪'
       },
       {
+        label: 'Erkunden',
+        description: exploringDescription,
+        value: 'erkunden',
+        emoji: '🧭'
+      },
+      {
+        label: 'Nahrung einlagern',
+        description: foodBankDescription,
+        value: 'food_bank',
+        emoji: '🍖'
+      },
+      {
         label: 'Lagerstatus',
         description: 'Zeigt den Fortschritt des gesamten Camps',
         value: 'lager',
@@ -349,8 +386,15 @@ function buildProfilePayload(player) {
       `${buildStatsText(stats)}\n\n` +
       `**🪵 Holz:** ${player.wood}\n` +
       `**🍖 Nahrung:** ${player.food}\n` +
-      `**🪨 Stein:** ${player.stone}\n` +
-      `**🏗️ Lagerbeitrag:** ${player.contribution}\n\n` +
+      `**🪨 Stein:** ${player.stone}
+` +
+      `**🏗️ Lagerbeitrag:** ${player.contribution}
+` +
+      `**🧭 Erkundungspunkte:** ${player.exploration_points || 0}
+` +
+      `**🏦 Nahrungsguthaben:** ${player.food_credit || 0}
+
+` +
       `**Status**\n` +
       `${busy.label}\n` +
       `${cooldowns.sammelnLabel}\n` +
@@ -482,13 +526,115 @@ async function runArbeiten(player, interaction) {
   });
 }
 
+async function runErkunden(player, interaction) {
+  const busy = getBusyStatus(player);
+  if (busy.isBusy) {
+    return buildBusyPayload(player);
+  }
+
+  const camp = getCampState(player.guild_key).progress;
+  if (camp.level < ERKUNDEN_UNLOCK_CAMP_LEVEL) {
+    return buildLockedPayload(
+      '🔒 Erkundung noch nicht freigeschaltet',
+      `Erkunden wird erst ab **Camp-Stufe ${ERKUNDEN_UNLOCK_CAMP_LEVEL}** freigeschaltet.
+
+Aktuell ist euer Camp auf **Stufe ${camp.level}**.`
+    );
+  }
+
+  const explorationPoints = randomInt(3, 6);
+  const xp = randomInt(6, 10);
+  const wood = randomInt(0, 1);
+  const food = randomInt(0, 1);
+  const stone = randomInt(0, 1);
+
+  const result = await applyProgressWithLevelUpAnnouncement({
+    client: interaction.client,
+    discordUserId: player.discord_user_id,
+    changes: {
+      exploration_points: explorationPoints,
+      xp,
+      wood,
+      food,
+      stone
+    }
+  });
+
+  logPlayerActivity(player.discord_user_id, 'erkunden', {
+    exploration_points: explorationPoints,
+    xp,
+    wood,
+    food,
+    stone
+  });
+
+  const busyUntil = new Date(Date.now() + ERKUNDEN_BUSY_MS).toISOString();
+  setBusyState(player.discord_user_id, 'erkunden', busyUntil);
+
+  await syncCampStatusMessage(interaction.client, player.guild_key).catch(() => null);
+
+  return buildActionResultPayload({
+    title: '🧭 Erkundung gestartet',
+    description:
+      `Du hast die Umgebung erkundet und erste Spuren kartiert.
+
+` +
+      `+${explorationPoints} Erkundungspunkte
+` +
+      `+${xp} XP
+` +
+      `+${wood} Holz
+` +
+      `+${food} Nahrung
+` +
+      `+${stone} Stein
+
+` +
+      `Du bist jetzt für **${formatRemaining(ERKUNDEN_BUSY_MS)}** unterwegs und kannst in dieser Zeit keine andere Dorfaktion starten.${result.levelUpText}`,
+    color: 0x3498db
+  });
+}
+
+async function runFoodBankDeposit(player, interaction) {
+  const busy = getBusyStatus(player);
+  if (busy.isBusy) {
+    return buildBusyPayload(player);
+  }
+
+  if ((Number(player.food) || 0) <= 0) {
+    return buildLockedPayload(
+      '🍖 Keine Nahrung zum Einlagern',
+      'Du hast aktuell keine Nahrung bei dir. Sammle erst Nahrung und lege sie dann in der Dorfkammer ein.'
+    );
+  }
+
+  const deposit = depositVillageFood(player.discord_user_id);
+
+  await syncCampStatusMessage(interaction.client, player.guild_key).catch(() => null);
+
+  return buildActionResultPayload({
+    title: '🏦 Nahrung eingelagert',
+    description:
+      `Du hast **${deposit.deposited} Nahrung** in die Dorfkammer eingelagert.
+
+` +
+      `**Dorfkammer:** ${deposit.villageFood}
+` +
+      `**Dein Nahrungsguthaben:** ${deposit.foodCredit}
+
+` +
+      `Für spätere Expeditionen kannst du nur so viel Nahrung mitnehmen, wie du selbst eingelagert hast.`,
+    color: 0xf39c12
+  });
+}
+
 async function runTrainieren(player, interaction) {
   const busy = getBusyStatus(player);
   if (busy.isBusy) {
     return buildBusyPayload(player);
   }
 
-  const camp = getCampState().progress;
+  const camp = getCampState(player.guild_key).progress;
   if (camp.level < TRAINIEREN_UNLOCK_CAMP_LEVEL) {
     return buildLockedPayload(
       '🔒 Training noch nicht freigeschaltet',
@@ -538,12 +684,12 @@ Aktuell ist euer Camp auf **Stufe ${camp.level}**.`
   });
 }
 
-function buildLagerPayload() {
-  const { totals, progress: camp } = getCampState();
+function buildLagerPayload(player) {
+  const { totals, progress: camp, villageFood } = getCampState(player.guild_key);
 
   const campProgressText = camp.isMaxLevel
     ? 'Max-Stufe erreicht'
-    : `${camp.currentInLevel}/${camp.neededForNextLevel} Beitrag bis Stufe ${camp.nextLevel}`;
+    : `${camp.currentInLevel}/${camp.neededForNextLevel} ${camp.progressionLabel} bis Stufe ${camp.nextLevel}`;
 
   return {
     content: '',
@@ -551,18 +697,40 @@ function buildLagerPayload() {
       new EmbedBuilder()
         .setTitle('🏕️ Lagerstatus')
         .setDescription(
-          `**Camp-Stufe:** ${camp.level}\n` +
-          `**Camp-Fortschritt:** ${campProgressText}\n\n` +
-          `**Abenteurer:** ${totals.players}\n` +
-          `**Gesamt-XP:** ${totals.xp}\n\n` +
-          `**🪵 Holz:** ${totals.wood}\n` +
-          `**🍖 Nahrung:** ${totals.food}\n` +
-          `**🪨 Stein:** ${totals.stone}\n` +
-          `**🏗️ Gesamtbeitrag:** ${totals.contribution}\n\n` +
-          `**Freischaltungen**\n` +
-          `Stufe 1: Sammeln, Arbeiten\n` +
-          `Stufe 2: Trainieren\n` +
-          `Stufe 3: Erkunden`
+          `**Camp-Stufe:** ${camp.level}
+` +
+          `**Phase:** ${camp.phaseLabel}
+` +
+          `**Camp-Fortschritt:** ${campProgressText}
+
+` +
+          `**Abenteurer:** ${totals.players}
+` +
+          `**Gesamt-XP:** ${totals.xp}
+
+` +
+          `**🪵 Holz:** ${totals.wood}
+` +
+          `**🍖 Nahrung (bei Spielern):** ${totals.food}
+` +
+          `**🏦 Dorfkammer:** ${villageFood}
+` +
+          `**🪨 Stein:** ${totals.stone}
+` +
+          `**🏗️ Baufortschritt:** ${totals.contribution}
+` +
+          `**🧭 Erkundungspunkte:** ${totals.exploration_points}
+
+` +
+          `**Freischaltungen**
+` +
+          `Stufe 1: Sammeln, Arbeiten
+` +
+          `Stufe 2: Trainieren
+` +
+          `Stufe 3: Erkunden
+` +
+          `Stufe 4: Expedition`
         )
         .setColor(0xf1c40f)
     ],
@@ -658,8 +826,18 @@ module.exports = {
         return true;
       }
 
+      if (value === 'erkunden') {
+        await interaction.editReply(await runErkunden(player, interaction)).catch(() => null);
+        return true;
+      }
+
+      if (value === 'food_bank') {
+        await interaction.editReply(await runFoodBankDeposit(player, interaction)).catch(() => null);
+        return true;
+      }
+
       if (value === 'lager') {
-        await interaction.editReply(buildLagerPayload()).catch(() => null);
+        await interaction.editReply(buildLagerPayload(player)).catch(() => null);
         return true;
       }
 
