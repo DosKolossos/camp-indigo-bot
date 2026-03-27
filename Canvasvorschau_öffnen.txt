@@ -1,0 +1,8 @@
+Bash Terminal 1: 
+npm run preview:camp:watch
+
+Bash Terminal 2:
+npx http-server . -p 4173 -a 0.0.0.0
+
+Im Browser öffnen: 
+http://localhost:4173/tmp/camp-preview.png

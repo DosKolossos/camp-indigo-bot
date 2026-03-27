@@ -4,7 +4,9 @@
   "private": true,
   "main": "src/index.js",
   "scripts": {
-    "start": "node src/index.js"
+    "start": "node src/index.js",
+    "preview:camp": "node scripts/preview-camp.js",
+    "preview:camp:watch": "nodemon -L --watch src/services/campStatusService.js --watch src/assets/camp --watch src/assets/pokemon --exec \"node scripts/preview-camp.js\""
   },
   "dependencies": {
     "@napi-rs/canvas": "^0.1.97",
@@ -12,5 +14,8 @@
     "discord.js": "^14.18.0",
     "dotenv": "^16.4.7",
     "express": "^4.21.2"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.14"
   }
 }

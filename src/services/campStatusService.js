@@ -97,6 +97,19 @@ function getPokemonAssetPath(pokemonKey) {
   return null;
 }
 
+function getGuildConfig(guildKey) {
+  return guilds.find(guild => guild.key === guildKey) || null;
+}
+
+function isGuildKey(value) {
+  return guilds.some(guild => guild.key === value);
+}
+
+function resolveProgressChannelId(guildKey) {
+  const guild = getGuildConfig(guildKey);
+  return guild?.progressChannelId || null;
+}
+
 function drawImageContain(ctx, image, x, y, width, height) {
   const scale = Math.min(width / image.width, height / image.height);
   const drawWidth = image.width * scale;
@@ -107,7 +120,7 @@ function drawImageContain(ctx, image, x, y, width, height) {
   ctx.drawImage(image, drawX, drawY, drawWidth, drawHeight);
 }
 
-async function renderCampImageBuffer() {
+async function renderCampImageBuffer(guildKey = null) {
   if (!CanvasLib) return null;
 
   const { createCanvas, loadImage, GlobalFonts } = CanvasLib;
@@ -120,8 +133,10 @@ async function renderCampImageBuffer() {
   const topContributor24h = getTopContributorLast24Hours();
   const ctx = canvas.getContext('2d');
 
+  const guild = guildKey ? getGuildConfig(guildKey) : null;
+  const guildName = guild?.name || guild?.guildName || guild?.title || 'Camp Gilde';
+
   let fontFamily = 'sans-serif';
-  let fontLoadedFrom = null;
 
   const fontCandidates = [
     path.join(process.cwd(), 'src', 'assets', 'camp', 'Inter-Regular.TTF'),
@@ -140,7 +155,6 @@ async function renderCampImageBuffer() {
       try {
         GlobalFonts.registerFromPath(candidate, 'CampStatusSans');
         fontFamily = 'CampStatusSans';
-        fontLoadedFrom = candidate;
         break;
       } catch (_error) {
         // ignore duplicate registrations
@@ -148,15 +162,13 @@ async function renderCampImageBuffer() {
     }
   }
 
-  console.log(`[camp-status] font family: ${fontFamily}`);
-  console.log(`[camp-status] font source: ${fontLoadedFrom || 'none'}`);
-
   const font = (size, weight = 'normal') => `${weight} ${size}px ${fontFamily}`;
 
   const colors = {
     white: '#f8fafc',
     soft: '#cbd5e1',
     muted: '#94a3b8',
+    black: '#000000',
     gold: '#fde68a',
     green: '#22c55e',
     blue: '#93c5fd',
@@ -184,73 +196,62 @@ async function renderCampImageBuffer() {
     ? 1
     : Math.max(0, Math.min(1, progress.currentInLevel / Math.max(1, progress.neededForNextLevel)));
 
-  const nextTarget = progress.nextLevelTarget ?? totals.contribution;
   const percentText = progress.isMaxLevel ? '100%' : `${Math.round(progressPercent * 100)}%`;
 
-  // Header links
-  ctx.fillStyle = colors.white;
-  ctx.font = font(30, 'bold');
-  ctx.fillText('Camp Indigo', 56, 76);
+  // Header
+  ctx.fillStyle = colors.black;
+  ctx.font = font(50, 'bold');
 
-  ctx.fillStyle = colors.soft;
-  ctx.font = font(18, 'bold');
-  ctx.fillText(`Camp-Stufe ${progress.level}`, 56, 110);
+  const displayedGuildName = trimText(ctx, guildName, 420);
+  ctx.fillText(`Gilde ${displayedGuildName}`, 56, 76);
+
+  const guildNameWidth = ctx.measureText(displayedGuildName).width;
+
+  ctx.fillStyle = colors.black;
+  ctx.font = font(30, 'bold');
+  ctx.fillText(`St. ${progress.level}`, 170 + guildNameWidth + 28, 77);
 
   drawProgressBar(ctx, {
     x: 56,
-    y: 146,
-    width: 430,
+    y: 96,
+    width: 800,
     height: 22,
     fillPercent: progressPercent,
     label: progress.isMaxLevel
       ? 'Max-Stufe erreicht'
-      : `${progress.currentInLevel}/${progress.neededForNextLevel} Beitrag bis Stufe ${progress.nextLevel}`,
+      : `${progress.currentInLevel}/${progress.neededForNextLevel} Beiträge bis Stufe ${progress.nextLevel} • ${percentText}`,
     fontFamily
   });
 
-  ctx.fillStyle = colors.white;
-  ctx.font = font(24, 'bold');
-  ctx.fillText(`${totals.contribution} / ${nextTarget}`, 56, 220);
-
-  ctx.fillStyle = colors.soft;
-  ctx.font = font(16, 'normal');
-  ctx.fillText(
-    progress.isMaxLevel
-      ? 'Maximale Camp-Stufe erreicht'
-      : `Noch ${progress.remainingToNextLevel} Beitrag bis Stufe ${progress.nextLevel} • ${percentText}`,
-    56,
-    250
-  );
-
   // Linke Karten
-  drawCard(ctx, 56, 292, 430, 128, 18, colors.card);
-  drawCard(ctx, 56, 446, 430, 160, 18, colors.card);
+  drawCard(ctx, 56, 292, 200, 128, 18, colors.card);
+  drawCard(ctx, 56, 446, 200, 160, 18, colors.card);
 
   ctx.fillStyle = colors.gold;
   ctx.font = font(18, 'bold');
-  ctx.fillText('Camp-Daten', 76, 310);
+  ctx.fillText('Camp-Daten', 76, 315);
 
-  drawLabelValue(ctx, 'Abenteurer', String(totals.players), 76, 345, 456, font, colors);
-  drawLabelValue(ctx, 'Gesamtbeitrag', String(totals.contribution), 76, 377, 456, font, colors);
-  drawLabelValue(ctx, 'Gesamt-XP', String(totals.xp), 76, 409, 456, font, colors);
+  drawLabelValue(ctx, 'Abenteurer', String(totals.players), 76, 345, 220, font, colors);
+  drawLabelValue(ctx, 'Gesamtbeitrag', String(totals.contribution), 76, 377, 220, font, colors);
+  drawLabelValue(ctx, 'Gesamt-XP', String(totals.xp), 76, 409, 220, font, colors);
 
   ctx.fillStyle = colors.gold;
   ctx.font = font(18, 'bold');
   ctx.fillText('Freigeschaltet', 76, 480);
 
   ctx.font = font(17, 'normal');
-  ctx.fillStyle = colors.white;
+  ctx.fillStyle = colors.black;
   getUnlockedFeatures(progress.level).forEach((feature, index) => {
     ctx.fillText(`• ${feature}`, 76, 515 + (index * 30));
   });
 
   // Rechte Spalte
-  drawCard(ctx, 760, 44, 460, 350, 20, colors.card);
-  drawCard(ctx, 760, 430, 460, 180, 20, colors.cardStrong);
+  drawCard(ctx, 1000, 44, 460, 350, 20, colors.card);
+  drawCard(ctx, 1000, 430, 460, 180, 20, colors.cardStrong);
 
-  ctx.fillStyle = colors.white;
+  ctx.fillStyle = colors.black;
   ctx.font = font(24, 'bold');
-  ctx.fillText('Top-Beiträger', 790, 82);
+  ctx.fillText('Top-Beiträger', 1000, 82);
 
   topContributors.forEach((player, index) => {
     const medal = index === 0 ? '🥇' : index === 1 ? '🥈' : '🥉';
@@ -258,19 +259,15 @@ async function renderCampImageBuffer() {
 
     ctx.fillStyle = colors.gold;
     ctx.font = font(22, 'bold');
-    ctx.fillText(medal, 792, y);
+    ctx.fillText(medal, 1000, y);
 
-    ctx.fillStyle = colors.white;
+    ctx.fillStyle = colors.black;
     ctx.font = font(24, 'bold');
-    ctx.fillText(trimText(ctx, player.discord_username, 300), 842, y);
-
-    ctx.fillStyle = colors.blue;
-    ctx.font = font(16, 'normal');
-    ctx.fillText(`Platz ${index + 1}`, 842, y + 24);
+    ctx.fillText(`#${index + 1}` + ` ` + trimText(ctx, player.discord_username, 300) , 1025, y);
 
     ctx.fillStyle = colors.gold;
-    ctx.font = font(20, 'bold');
-    ctx.fillText(`Gesamtbeitrag: ${player.contribution}`, 842, y + 52);
+    ctx.font = font(15, 'bold');
+    ctx.fillText(`Gesamtbeitrag: ${player.contribution}`, 1060, y + 20);
   });
 
   ctx.fillStyle = colors.gold;
@@ -280,11 +277,11 @@ async function renderCampImageBuffer() {
   if (topContributor24h) {
     const starter = getStarterConfig(topContributor24h.pokemon_key);
 
-    ctx.fillStyle = colors.white;
+    ctx.fillStyle = colors.black;
     ctx.font = font(24, 'bold');
     ctx.fillText(trimText(ctx, topContributor24h.discord_username, 240), 790, 512);
 
-    ctx.fillStyle = colors.soft;
+    ctx.fillStyle = colors.black;
     ctx.font = font(15, 'normal');
     ctx.fillText(
       `Partner: ${starter?.name || topContributor24h.pokemon_key || 'Unbekannt'}`,
@@ -292,49 +289,37 @@ async function renderCampImageBuffer() {
       540
     );
 
-    drawMiniStat(ctx, '+Beitrag', `+${topContributor24h.contribution_24h}`, 790, 565, 170, font, colors);
-    drawMiniStat(ctx, '+XP', `+${topContributor24h.xp_24h || 0}`, 980, 565, 170, font, colors);
+    drawMiniStat(ctx, '+Beitrag', `+${topContributor24h.contribution_24h}`, 760, 560, 170, font, colors);
+    drawMiniStat(ctx, '+XP', `+${topContributor24h.xp_24h || 0}`, 950, 560, 170, font, colors);
 
     const pokemonCardX = 1050;
-    const pokemonCardY = 445;
-    const pokemonCardW = 170;
-    const pokemonCardH = 125;
+    const pokemonCardY = 410;
+    const pokemonCardW = 200;
+    const pokemonCardH = 200;
 
-    drawCard(ctx, pokemonCardX, pokemonCardY, pokemonCardW, pokemonCardH, 18, 'rgba(255,255,255,0.10)');
+    drawCard(ctx, pokemonCardX, pokemonCardY, pokemonCardW, pokemonCardH, 18, 'rgba(255,255,255,0.0)');
 
     const pokemonAssetPath = getPokemonAssetPath(topContributor24h.pokemon_key);
 
     if (pokemonAssetPath) {
       try {
         const pokemonImage = await loadImage(pokemonAssetPath);
-        drawImageContain(ctx, pokemonImage, pokemonCardX + 12, pokemonCardY + 8, pokemonCardW - 24, pokemonCardH - 36);
+        drawImageContain(ctx, pokemonImage, pokemonCardX, pokemonCardY, pokemonCardW, pokemonCardH);
       } catch (_error) {
-        ctx.fillStyle = colors.soft;
+        ctx.fillStyle = colors.black;
         ctx.font = font(14, 'normal');
         ctx.fillText('Bild konnte nicht geladen werden', pokemonCardX + 14, pokemonCardY + 68);
       }
     } else {
-      ctx.fillStyle = colors.soft;
+      ctx.fillStyle = colors.black;
       ctx.font = font(14, 'normal');
       ctx.fillText('Kein Pokémon-Bild gefunden', pokemonCardX + 14, pokemonCardY + 68);
     }
-
-    ctx.fillStyle = colors.white;
-    ctx.font = font(14, 'bold');
-    ctx.fillText(
-      trimText(ctx, starter?.name || topContributor24h.pokemon_key || 'Unbekannt', 140),
-      pokemonCardX + 14,
-      pokemonCardY + 112
-    );
   } else {
-    ctx.fillStyle = colors.soft;
+    ctx.fillStyle = colors.black;
     ctx.font = font(18, 'normal');
     ctx.fillText('Noch keine Aktivität in den letzten 24h.', 790, 512);
   }
-
-  ctx.fillStyle = 'rgba(255,255,255,0.82)';
-  ctx.font = font(16, 'normal');
-  ctx.fillText('Grafik wird automatisch bei Lagerfortschritt aktualisiert.', 56, 664);
 
   return canvas.toBuffer('image/png');
 }
@@ -364,10 +349,12 @@ function drawFallbackBackground(ctx, width, height, level) {
     ctx.arc(x, 110, 24, 0, Math.PI * 2);
     ctx.fill();
   }
+
   for (let y = 120; y <= 560; y += 52) {
     ctx.beginPath();
     ctx.arc(228, y, 22, 0, Math.PI * 2);
     ctx.fill();
+
     ctx.beginPath();
     ctx.arc(748, y, 22, 0, Math.PI * 2);
     ctx.fill();
@@ -404,13 +391,10 @@ function drawFallbackBackground(ctx, width, height, level) {
 }
 
 function drawOverlayPanel(ctx, width, height) {
-  ctx.fillStyle = 'rgba(15, 23, 42, 0.78)';
+  ctx.fillStyle = 'rgba(15, 23, 42, 0.28)';
   roundRect(ctx, 28, 28, 1224, 664, 24);
   ctx.fill();
 
-  ctx.fillStyle = 'rgba(255,255,255,0.08)';
-  roundRect(ctx, 740, 28, 512, 664, 24);
-  ctx.fill();
 }
 
 function drawProgressBar(ctx, { x, y, width, height, fillPercent, label, fontFamily = 'sans-serif' }) {
@@ -423,8 +407,8 @@ function drawProgressBar(ctx, { x, y, width, height, fillPercent, label, fontFam
   ctx.fill();
 
   ctx.font = `16px ${fontFamily}`;
-  ctx.fillStyle = '#dbeafe';
-  ctx.fillText(label, x, y + height + 24);
+  ctx.fillStyle = '#000000';
+  ctx.fillText(label, x + 3, y + height - 6);
 }
 
 function drawCard(ctx, x, y, width, height, radius, fillStyle) {
@@ -434,11 +418,11 @@ function drawCard(ctx, x, y, width, height, radius, fillStyle) {
 }
 
 function drawLabelValue(ctx, label, value, x, y, valueX, font, colors) {
-  ctx.fillStyle = colors.soft;
+  ctx.fillStyle = colors.black;
   ctx.font = font(15, 'normal');
   ctx.fillText(label, x, y);
 
-  ctx.fillStyle = colors.white;
+  ctx.fillStyle = colors.black;
   ctx.font = font(22, 'bold');
   const measured = ctx.measureText(value).width;
   ctx.fillText(value, valueX - measured, y);
@@ -449,11 +433,11 @@ function drawMiniStat(ctx, label, value, x, y, width, font, colors) {
   roundRect(ctx, x, y, width, 52, 14);
   ctx.fill();
 
-  ctx.fillStyle = colors.soft;
+  ctx.fillStyle = colors.black;
   ctx.font = font(13, 'normal');
   ctx.fillText(label, x + 14, y + 18);
 
-  ctx.fillStyle = colors.white;
+  ctx.fillStyle = colors.black;
   ctx.font = font(22, 'bold');
   ctx.fillText(value, x + 14, y + 40);
 }
@@ -469,7 +453,7 @@ function roundRect(ctx, x, y, width, height, radius) {
   ctx.closePath();
 }
 
-async function buildCampStatusPayload() {
+async function buildCampStatusPayload(guildKey = null) {
   const totals = getCampTotals();
   const progress = getCampProgress(totals.contribution);
   const topContributors = getCampTopContributors(5);
@@ -486,7 +470,7 @@ async function buildCampStatusPayload() {
     .setColor(0x2ecc71)
     .setFooter({ text: 'Eine feste Nachricht – wird automatisch aktualisiert.' });
 
-  const buffer = await renderCampImageBuffer();
+  const buffer = await renderCampImageBuffer(guildKey);
   if (!buffer) {
     return { embeds: [embed], components: [] };
   }
@@ -501,20 +485,6 @@ async function buildCampStatusPayload() {
     attachments: [],
     components: []
   };
-}
-
-
-function getGuildConfig(guildKey) {
-  return guilds.find(guild => guild.key === guildKey) || null;
-}
-
-function isGuildKey(value) {
-  return guilds.some(guild => guild.key === value);
-}
-
-function resolveProgressChannelId(guildKey) {
-  const guild = getGuildConfig(guildKey);
-  return guild?.progressChannelId || null;
 }
 
 async function findExistingCampStatusMessage(client, guildKey = null) {
@@ -558,6 +528,7 @@ async function findCampStatusMessageByScan(channel) {
 
   return null;
 }
+
 async function ensureCampStatusMessage(client, guildKeyOrChannelId, explicitTargetChannelId = null) {
   const guildMode = isGuildKey(guildKeyOrChannelId);
   const guildKey = guildMode ? guildKeyOrChannelId : null;
@@ -583,7 +554,7 @@ async function ensureCampStatusMessage(client, guildKeyOrChannelId, explicitTarg
     ? (await findExistingCampStatusMessage(client, guildKey)) || await findCampStatusMessageByScan(targetChannel)
     : (await findExistingCampStatusMessage(client)) || await findCampStatusMessageByScan(targetChannel);
 
-  const payload = await buildCampStatusPayload();
+  const payload = await buildCampStatusPayload(guildKey);
 
   let finalMessage;
   if (existing) {
@@ -615,7 +586,7 @@ async function ensureCampStatusMessage(client, guildKeyOrChannelId, explicitTarg
 async function syncCampStatusMessage(client, guildKey) {
   if (!guildKey) return null;
 
-  return ensureCampStatusMessage(client, guildKey).catch(error => {
+  return await ensureCampStatusMessage(client, guildKey).catch(error => {
     console.error(`Camp-Status für Gilde "${guildKey}" konnte nicht synchronisiert werden:`, error);
     return null;
   });

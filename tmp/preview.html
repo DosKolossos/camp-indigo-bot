@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <title>Camp Preview</title>
+  <style>
+    body {
+      margin: 0;
+      background: #0f172a;
+      color: white;
+      font-family: Arial, sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 24px;
+      gap: 16px;
+    }
+
+    .meta {
+      opacity: 0.8;
+      font-size: 14px;
+    }
+
+    img {
+      max-width: 95vw;
+      max-height: 85vh;
+      border-radius: 12px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.35);
+      background: #111827;
+    }
+  </style>
+</head>
+<body>
+  <h1>Camp Canvas Preview</h1>
+  <div class="meta" id="status">warte auf Updates...</div>
+  <img id="preview" src="./camp-preview.png" alt="Camp Preview" />
+
+  <script>
+    const img = document.getElementById('preview');
+    const status = document.getElementById('status');
+
+    function refreshImage() {
+      const ts = Date.now();
+      img.src = `./camp-preview.png?t=${ts}`;
+      status.textContent = `Letzter Refresh: ${new Date().toLocaleTimeString()}`;
+    }
+
+    setInterval(refreshImage, 1000);
+    refreshImage();
+  </script>
+</body>
+</html>
