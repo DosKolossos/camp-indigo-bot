@@ -13,12 +13,10 @@ const {
   getPlayerByDiscordUserId,
   getCampTotals,
   setActionCooldown,
-  setBusyState,
   logPlayerActivity
 } = require('../services/playerService');
 const { applyProgressWithLevelUpAnnouncement } = require('../services/levelUpService');
 const { syncCampStatusMessage } = require('../services/campStatusService');
-const { getVillageFood, depositVillageFood } = require('../services/villageStorageService');
 const {
   getXpProgress,
   getCampProgress,
@@ -28,10 +26,10 @@ const {
 const SAMMELN_COOLDOWN_MS = parseDurationMs(process.env.SAMMELN_COOLDOWN_MINUTES, 10 * 60 * 1000, 60 * 1000);
 const ARBEITEN_COOLDOWN_MS = parseDurationMs(process.env.ARBEITEN_COOLDOWN_MINUTES, 8 * 60 * 1000, 60 * 1000);
 const TRAINIEREN_COOLDOWN_MS = parseDurationMs(process.env.TRAINIEREN_COOLDOWN_MINUTES, 12 * 60 * 1000, 60 * 1000);
-const ERKUNDEN_BUSY_MS = parseDurationMs(process.env.ERKUNDEN_BUSY_MINUTES, 60 * 60 * 1000, 60 * 1000);
 
 const TRAINIEREN_UNLOCK_CAMP_LEVEL = 2;
 const ERKUNDEN_UNLOCK_CAMP_LEVEL = 3;
+const EXPEDITION_UNLOCK_CAMP_LEVEL = 4;
 
 function parseDurationMs(envValue, fallback, multiplier = 1) {
   const numericValue = Number(envValue);
@@ -111,6 +109,24 @@ function buildBackRow() {
   );
 }
 
+function clampMin(value, minValue) {
+  return Math.max(minValue, value);
+}
+
+function getPlayerStats(player) {
+  return calculateScaledStats(player.pokemon_key, player.level);
+}
+
+function getTempoAdjustedCooldownMs(baseCooldownMs, tempo = 0) {
+  const reductionSteps = Math.floor((Number(tempo) || 0) / 3);
+  const reductionMs = reductionSteps * 30 * 1000;
+  return clampMin(baseCooldownMs - reductionMs, 2 * 60 * 1000);
+}
+
+function getDisplayedMaxHp(stats) {
+  return 35 + ((Number(stats?.ausdauer) || 0) * 6);
+}
+
 function getCooldownRemainingMs(player, fieldName) {
   const value = player?.[fieldName];
   if (!value) return 0;
@@ -178,28 +194,120 @@ function getBusyStatus(player) {
 }
 
 function getActionStatus(player) {
+  const stats = getPlayerStats(player);
+
+  const sammelnCooldownMs = getTempoAdjustedCooldownMs(SAMMELN_COOLDOWN_MS, stats.tempo);
+  const arbeitenCooldownMs = getTempoAdjustedCooldownMs(ARBEITEN_COOLDOWN_MS, stats.tempo);
+  const trainierenCooldownMs = getTempoAdjustedCooldownMs(TRAINIEREN_COOLDOWN_MS, stats.tempo);
+
   const sammelnRemaining = getCooldownRemainingMs(player, 'sammeln_cooldown_until');
   const arbeitenRemaining = getCooldownRemainingMs(player, 'arbeiten_cooldown_until');
   const trainierenRemaining = getCooldownRemainingMs(player, 'trainieren_cooldown_until');
 
   return {
+    stats,
+    sammelnCooldownMs,
+    arbeitenCooldownMs,
+    trainierenCooldownMs,
     sammelnRemaining,
     arbeitenRemaining,
     trainierenRemaining,
-    sammelnLabel: sammelnRemaining > 0 ? `⏳ Sammeln in ${formatRemaining(sammelnRemaining)}` : '✅ Sammeln ist bereit',
-    arbeitenLabel: arbeitenRemaining > 0 ? `⏳ Arbeiten in ${formatRemaining(arbeitenRemaining)}` : '✅ Arbeiten ist bereit',
-    trainierenLabel: trainierenRemaining > 0 ? `⏳ Trainieren in ${formatRemaining(trainierenRemaining)}` : '✅ Trainieren ist bereit'
+    sammelnLabel: sammelnRemaining > 0
+      ? `⏳ Sammeln in ${formatRemaining(sammelnRemaining)}`
+      : `✅ Sammeln ist bereit (${formatRemaining(sammelnCooldownMs)} Cooldown)`,
+    arbeitenLabel: arbeitenRemaining > 0
+      ? `⏳ Arbeiten in ${formatRemaining(arbeitenRemaining)}`
+      : `✅ Arbeiten ist bereit (${formatRemaining(arbeitenCooldownMs)} Cooldown)`,
+    trainierenLabel: trainierenRemaining > 0
+      ? `⏳ Trainieren in ${formatRemaining(trainierenRemaining)}`
+      : `✅ Trainieren ist bereit (${formatRemaining(trainierenCooldownMs)} Cooldown)`
   };
 }
 
-function getCampState(guildKey = null) {
-  const totals = getCampTotals(guildKey);
-  const progress = getCampProgress({
-    contribution: totals.contribution,
-    explorationPoints: totals.exploration_points
+function getCampState() {
+  const totals = getCampTotals();
+  const progress = getCampProgress(totals.contribution);
+
+  return { totals, progress };
+}
+
+function getUnlockedActionKeys(campLevel) {
+  const keys = ['profil', 'sammeln', 'arbeiten', 'lager'];
+
+  if (campLevel >= TRAINIEREN_UNLOCK_CAMP_LEVEL) {
+    keys.push('trainieren');
+  }
+
+  return keys;
+}
+
+function getNextUnlockHint(campLevel) {
+  if (campLevel < TRAINIEREN_UNLOCK_CAMP_LEVEL) {
+    return `🔒 Nächste Freischaltung: **Trainieren** ab Camp-Stufe ${TRAINIEREN_UNLOCK_CAMP_LEVEL}`;
+  }
+
+  if (campLevel < ERKUNDEN_UNLOCK_CAMP_LEVEL) {
+    return `🔒 Nächste Freischaltung: **Erkunden** ab Camp-Stufe ${ERKUNDEN_UNLOCK_CAMP_LEVEL}`;
+  }
+
+  if (campLevel < EXPEDITION_UNLOCK_CAMP_LEVEL) {
+    return `🔒 Nächste Freischaltung: **Expedition** ab Camp-Stufe ${EXPEDITION_UNLOCK_CAMP_LEVEL}`;
+  }
+
+  return '✨ Alle aktuell eingebauten Camp-Aktionen sind freigeschaltet.';
+}
+
+function buildActionOptions({ busy, cooldowns, trainingUnlocked }) {
+  const options = [
+    {
+      label: 'Profil ansehen',
+      description: 'Zeigt dein Pokémon, deine Gilde und deine Werte',
+      value: 'profil',
+      emoji: '📜'
+    },
+    {
+      label: 'Sammeln',
+      description: busy.isBusy
+        ? `Gesperrt: Du bist auf ${getBusyActivityLabel(busy.activityKey)}`
+        : cooldowns.sammelnRemaining > 0
+          ? `Wieder bereit in ${formatRemaining(cooldowns.sammelnRemaining)}`
+          : 'Sammle Holz, Nahrung, Stein und XP',
+      value: 'sammeln',
+      emoji: '🌿'
+    },
+    {
+      label: 'Arbeiten',
+      description: busy.isBusy
+        ? `Gesperrt: Du bist auf ${getBusyActivityLabel(busy.activityKey)}`
+        : cooldowns.arbeitenRemaining > 0
+          ? `Wieder bereit in ${formatRemaining(cooldowns.arbeitenRemaining)}`
+          : 'Hilf dem Lager beim Ausbau',
+      value: 'arbeiten',
+      emoji: '🔨'
+    }
+  ];
+
+  if (trainingUnlocked) {
+    options.push({
+      label: 'Trainieren',
+      description: busy.isBusy
+        ? `Gesperrt: Du bist auf ${getBusyActivityLabel(busy.activityKey)}`
+        : cooldowns.trainierenRemaining > 0
+          ? `Wieder bereit in ${formatRemaining(cooldowns.trainierenRemaining)}`
+          : 'Steigere deine Werte über XP',
+      value: 'trainieren',
+      emoji: '💪'
+    });
+  }
+
+  options.push({
+    label: 'Lagerstatus',
+    description: 'Zeigt den Fortschritt des gesamten Camps',
+    value: 'lager',
+    emoji: '🏕️'
   });
 
-  return { totals, progress, villageFood: getVillageFood(guildKey) };
+  return options;
 }
 
 function buildLockedPayload(title, description) {
@@ -250,29 +358,72 @@ function buildActionMenu(player) {
   const guild = getGuild(player.guild_key);
   const cooldowns = getActionStatus(player);
   const busy = getBusyStatus(player);
-  const camp = getCampState(player.guild_key).progress;
+  const camp = getCampState().progress;
 
   const trainingUnlocked = camp.level >= TRAINIEREN_UNLOCK_CAMP_LEVEL;
-  const exploringUnlocked = camp.level >= ERKUNDEN_UNLOCK_CAMP_LEVEL;
-  const trainingDescription = busy.isBusy
-    ? `Gesperrt: Du bist auf ${getBusyActivityLabel(busy.activityKey)}`
-    : !trainingUnlocked
-      ? `Freischaltung ab Camp-Stufe ${TRAINIEREN_UNLOCK_CAMP_LEVEL}`
-      : cooldowns.trainierenRemaining > 0
-        ? `Wieder bereit in ${formatRemaining(cooldowns.trainierenRemaining)}`
-        : 'Steigere deine Werte über XP';
 
-  const exploringDescription = busy.isBusy
-    ? `Gesperrt: Du bist auf ${getBusyActivityLabel(busy.activityKey)}`
-    : !exploringUnlocked
-      ? `Freischaltung ab Camp-Stufe ${ERKUNDEN_UNLOCK_CAMP_LEVEL}`
-      : `1 Stunde unterwegs · ${camp.progressionLabel} + kleine Funde`;
+  const statusLines = [
+    busy.label,
+    cooldowns.sammelnLabel,
+    cooldowns.arbeitenLabel
+  ];
 
-  const foodBankDescription = busy.isBusy
-    ? `Gesperrt: Du bist auf ${getBusyActivityLabel(busy.activityKey)}`
-    : player.food > 0
-      ? `Lege deine Nahrung in die Dorfkammer ein (${player.food} dabei)`
-      : 'Du hast aktuell keine Nahrung zum Einlagern';
+  if (trainingUnlocked) {
+    statusLines.push(cooldowns.trainierenLabel);
+  }
+
+  const nextUnlockHint = trainingUnlocked
+    ? '✨ Weitere Aktionen folgen mit späteren Camp-Erweiterungen.'
+    : `🔒 Nächste Freischaltung: **Trainieren** ab Camp-Stufe ${TRAINIEREN_UNLOCK_CAMP_LEVEL}`;
+
+  const actionOptions = [
+    {
+      label: 'Profil ansehen',
+      description: 'Zeigt dein Pokémon, deine Gilde und deine Werte',
+      value: 'profil',
+      emoji: '📜'
+    },
+    {
+      label: 'Sammeln',
+      description: busy.isBusy
+        ? `Gesperrt: Du bist auf ${getBusyActivityLabel(busy.activityKey)}`
+        : cooldowns.sammelnRemaining > 0
+          ? `Wieder bereit in ${formatRemaining(cooldowns.sammelnRemaining)}`
+          : 'Sammle Holz, Nahrung, Stein und XP',
+      value: 'sammeln',
+      emoji: '🌿'
+    },
+    {
+      label: 'Arbeiten',
+      description: busy.isBusy
+        ? `Gesperrt: Du bist auf ${getBusyActivityLabel(busy.activityKey)}`
+        : cooldowns.arbeitenRemaining > 0
+          ? `Wieder bereit in ${formatRemaining(cooldowns.arbeitenRemaining)}`
+          : 'Hilf dem Lager beim Ausbau',
+      value: 'arbeiten',
+      emoji: '🔨'
+    }
+  ];
+
+  if (trainingUnlocked) {
+    actionOptions.push({
+      label: 'Trainieren',
+      description: busy.isBusy
+        ? `Gesperrt: Du bist auf ${getBusyActivityLabel(busy.activityKey)}`
+        : cooldowns.trainierenRemaining > 0
+          ? `Wieder bereit in ${formatRemaining(cooldowns.trainierenRemaining)}`
+          : 'Steigere deine Werte über XP',
+      value: 'trainieren',
+      emoji: '💪'
+    });
+  }
+
+  actionOptions.push({
+    label: 'Lagerstatus',
+    description: 'Zeigt den Fortschritt des gesamten Camps',
+    value: 'lager',
+    emoji: '🏕️'
+  });
 
   const embed = new EmbedBuilder()
     .setTitle('🎮 Deine Aktionen')
@@ -283,15 +434,8 @@ function buildActionMenu(player) {
       `**Fortschritt:** ${getXpProgressText(player)}\n` +
       `**Camp-Stufe:** ${camp.level}\n\n` +
       `**Status**\n` +
-      `${busy.label}\n` +
-      `${cooldowns.sammelnLabel}\n` +
-      `${cooldowns.arbeitenLabel}
-` +
-      `${trainingUnlocked ? cooldowns.trainierenLabel : `🔒 Trainieren ab Camp-Stufe ${TRAINIEREN_UNLOCK_CAMP_LEVEL}`}
-` +
-      `${exploringUnlocked ? '🧭 Erkunden ist bereit' : `🔒 Erkunden ab Camp-Stufe ${ERKUNDEN_UNLOCK_CAMP_LEVEL}`}
-
-` +
+      `${statusLines.join('\n')}\n\n` +
+      `${nextUnlockHint}\n\n` +
       'Wähle deine nächste Aktion.'
     )
     .setFooter({
@@ -302,58 +446,7 @@ function buildActionMenu(player) {
   const menu = new StringSelectMenuBuilder()
     .setCustomId('camp:actions:menu')
     .setPlaceholder('Aktion auswählen')
-    .addOptions([
-      {
-        label: 'Profil ansehen',
-        description: 'Zeigt dein Pokémon, deine Gilde und deine Werte',
-        value: 'profil',
-        emoji: '📜'
-      },
-      {
-        label: 'Sammeln',
-        description: busy.isBusy
-          ? `Gesperrt: Du bist auf ${getBusyActivityLabel(busy.activityKey)}`
-          : cooldowns.sammelnRemaining > 0
-            ? `Wieder bereit in ${formatRemaining(cooldowns.sammelnRemaining)}`
-            : 'Sammle Holz, Nahrung, Stein und XP',
-        value: 'sammeln',
-        emoji: '🌿'
-      },
-      {
-        label: 'Arbeiten',
-        description: busy.isBusy
-          ? `Gesperrt: Du bist auf ${getBusyActivityLabel(busy.activityKey)}`
-          : cooldowns.arbeitenRemaining > 0
-            ? `Wieder bereit in ${formatRemaining(cooldowns.arbeitenRemaining)}`
-            : 'Hilf dem Lager beim Ausbau',
-        value: 'arbeiten',
-        emoji: '🔨'
-      },
-      {
-        label: 'Trainieren',
-        description: trainingDescription,
-        value: 'trainieren',
-        emoji: '💪'
-      },
-      {
-        label: 'Erkunden',
-        description: exploringDescription,
-        value: 'erkunden',
-        emoji: '🧭'
-      },
-      {
-        label: 'Nahrung einlagern',
-        description: foodBankDescription,
-        value: 'food_bank',
-        emoji: '🍖'
-      },
-      {
-        label: 'Lagerstatus',
-        description: 'Zeigt den Fortschritt des gesamten Camps',
-        value: 'lager',
-        emoji: '🏕️'
-      }
-    ]);
+    .addOptions(actionOptions);
 
   return {
     content: '',
@@ -368,6 +461,7 @@ function buildProfilePayload(player) {
   const cooldowns = getActionStatus(player);
   const busy = getBusyStatus(player);
   const stats = calculateScaledStats(player.pokemon_key, player.level);
+  const maxHp = getDisplayedMaxHp(stats);
   const xpProgress = getXpProgress(player.xp);
 
   const progressText = xpProgress.isMaxLevel
@@ -383,18 +477,12 @@ function buildProfilePayload(player) {
       `**XP gesamt:** ${player.xp}\n` +
       `**Fortschritt:** ${progressText}\n\n` +
       `**Aktuelle Werte**\n` +
-      `${buildStatsText(stats)}\n\n` +
+      `${buildStatsText(stats)}\n` +
+      `**❤️ Max-KP:** ${maxHp}\n\n` +
       `**🪵 Holz:** ${player.wood}\n` +
       `**🍖 Nahrung:** ${player.food}\n` +
-      `**🪨 Stein:** ${player.stone}
-` +
-      `**🏗️ Lagerbeitrag:** ${player.contribution}
-` +
-      `**🧭 Erkundungspunkte:** ${player.exploration_points || 0}
-` +
-      `**🏦 Nahrungsguthaben:** ${player.food_credit || 0}
-
-` +
+      `**🪨 Stein:** ${player.stone}\n` +
+      `**🏗️ Lagerbeitrag:** ${player.contribution}\n\n` +
       `**Status**\n` +
       `${busy.label}\n` +
       `${cooldowns.sammelnLabel}\n` +
@@ -420,15 +508,18 @@ async function runSammeln(player, interaction) {
     return buildBusyPayload(player);
   }
 
+  const cooldowns = getActionStatus(player);
+  const { stats } = cooldowns;
+
   const remainingMs = getCooldownRemainingMs(player, 'sammeln_cooldown_until');
   if (remainingMs > 0) {
     return buildCooldownPayload('Sammeln', remainingMs);
   }
 
-  const wood = randomInt(1, 3);
-  const food = randomInt(1, 2);
-  const stone = randomInt(0, 2);
-  const xp = randomInt(4, 6);
+  const wood = randomInt(1, 2) + Math.floor((stats.geschick || 0) / 5);
+  const food = randomInt(0, 1) + Math.floor((stats.instinkt || 0) / 5);
+  const stone = randomInt(0, 1) + Math.floor((stats.kraft || 0) / 8);
+  const xp = randomInt(3, 5) + Math.floor(((stats.instinkt || 0) + (stats.geschick || 0)) / 10);
 
   const result = await applyProgressWithLevelUpAnnouncement({
     client: interaction.client,
@@ -442,7 +533,8 @@ async function runSammeln(player, interaction) {
     stone,
     xp
   });
-  const cooldownUntil = new Date(Date.now() + SAMMELN_COOLDOWN_MS).toISOString();
+
+  const cooldownUntil = new Date(Date.now() + cooldowns.sammelnCooldownMs).toISOString();
   setActionCooldown(player.discord_user_id, 'sammeln', cooldownUntil);
 
   await syncCampStatusMessage(interaction.client, player.guild_key).catch(() => null);
@@ -450,19 +542,13 @@ async function runSammeln(player, interaction) {
   return buildActionResultPayload({
     title: '🌿 Sammeln abgeschlossen',
     description:
-      `Du warst für das Lager unterwegs.
-
-` +
-      `+${wood} Holz
-` +
-      `+${food} Nahrung
-` +
-      `+${stone} Stein
-` +
-      `+${xp} XP
-
-` +
-      `Nächste Sammelaktion in **${formatRemaining(SAMMELN_COOLDOWN_MS)}**.${result.levelUpText}`,
+      `Du warst für das Lager unterwegs.\n\n` +
+      `+${wood} Holz\n` +
+      `+${food} Nahrung\n` +
+      `+${stone} Stein\n` +
+      `+${xp} XP\n\n` +
+      `**Instinkt** und **Geschick** haben deine Ausbeute verbessert.\n` +
+      `Nächste Sammelaktion in **${formatRemaining(cooldowns.sammelnCooldownMs)}**.${result.levelUpText}`,
     color: 0x27ae60
   });
 }
@@ -473,15 +559,18 @@ async function runArbeiten(player, interaction) {
     return buildBusyPayload(player);
   }
 
+  const cooldowns = getActionStatus(player);
+  const { stats } = cooldowns;
+
   const remainingMs = getCooldownRemainingMs(player, 'arbeiten_cooldown_until');
   if (remainingMs > 0) {
     return buildCooldownPayload('Arbeiten', remainingMs);
   }
 
-  const contribution = randomInt(2, 5);
-  const wood = randomInt(0, 1);
-  const stone = randomInt(0, 1);
-  const xp = randomInt(3, 5);
+  const contribution = randomInt(2, 4) + Math.floor((stats.kraft || 0) / 4);
+  const wood = randomInt(0, 1) + Math.floor((stats.geschick || 0) / 9);
+  const stone = randomInt(0, 1) + Math.floor((stats.kraft || 0) / 10);
+  const xp = randomInt(2, 4) + Math.floor((((stats.kraft || 0) + (stats.ausdauer || 0))) / 12);
 
   const result = await applyProgressWithLevelUpAnnouncement({
     client: interaction.client,
@@ -501,7 +590,7 @@ async function runArbeiten(player, interaction) {
     xp
   });
 
-  const cooldownUntil = new Date(Date.now() + ARBEITEN_COOLDOWN_MS).toISOString();
+  const cooldownUntil = new Date(Date.now() + cooldowns.arbeitenCooldownMs).toISOString();
   setActionCooldown(player.discord_user_id, 'arbeiten', cooldownUntil);
 
   await syncCampStatusMessage(interaction.client, player.guild_key).catch(() => null);
@@ -509,122 +598,14 @@ async function runArbeiten(player, interaction) {
   return buildActionResultPayload({
     title: '🔨 Arbeit im Lager erledigt',
     description:
-      `Du hast beim Ausbau des Camps geholfen.
-
-` +
-      `+${contribution} Lagerbeitrag
-` +
-      `+${wood} Holz
-` +
-      `+${stone} Stein
-` +
-      `+${xp} XP
-
-` +
-      `Nächste Arbeitsaktion in **${formatRemaining(ARBEITEN_COOLDOWN_MS)}**.${result.levelUpText}`,
+      `Du hast beim Ausbau des Camps geholfen.\n\n` +
+      `+${contribution} Lagerbeitrag\n` +
+      `+${wood} Holz\n` +
+      `+${stone} Stein\n` +
+      `+${xp} XP\n\n` +
+      `**Kraft** hat deinen Lagerbeitrag verbessert.\n` +
+      `Nächste Arbeitsaktion in **${formatRemaining(cooldowns.arbeitenCooldownMs)}**.${result.levelUpText}`,
     color: 0xe67e22
-  });
-}
-
-async function runErkunden(player, interaction) {
-  const busy = getBusyStatus(player);
-  if (busy.isBusy) {
-    return buildBusyPayload(player);
-  }
-
-  const camp = getCampState(player.guild_key).progress;
-  if (camp.level < ERKUNDEN_UNLOCK_CAMP_LEVEL) {
-    return buildLockedPayload(
-      '🔒 Erkundung noch nicht freigeschaltet',
-      `Erkunden wird erst ab **Camp-Stufe ${ERKUNDEN_UNLOCK_CAMP_LEVEL}** freigeschaltet.
-
-Aktuell ist euer Camp auf **Stufe ${camp.level}**.`
-    );
-  }
-
-  const explorationPoints = randomInt(3, 6);
-  const xp = randomInt(6, 10);
-  const wood = randomInt(0, 1);
-  const food = randomInt(0, 1);
-  const stone = randomInt(0, 1);
-
-  const result = await applyProgressWithLevelUpAnnouncement({
-    client: interaction.client,
-    discordUserId: player.discord_user_id,
-    changes: {
-      exploration_points: explorationPoints,
-      xp,
-      wood,
-      food,
-      stone
-    }
-  });
-
-  logPlayerActivity(player.discord_user_id, 'erkunden', {
-    exploration_points: explorationPoints,
-    xp,
-    wood,
-    food,
-    stone
-  });
-
-  const busyUntil = new Date(Date.now() + ERKUNDEN_BUSY_MS).toISOString();
-  setBusyState(player.discord_user_id, 'erkunden', busyUntil);
-
-  await syncCampStatusMessage(interaction.client, player.guild_key).catch(() => null);
-
-  return buildActionResultPayload({
-    title: '🧭 Erkundung gestartet',
-    description:
-      `Du hast die Umgebung erkundet und erste Spuren kartiert.
-
-` +
-      `+${explorationPoints} Erkundungspunkte
-` +
-      `+${xp} XP
-` +
-      `+${wood} Holz
-` +
-      `+${food} Nahrung
-` +
-      `+${stone} Stein
-
-` +
-      `Du bist jetzt für **${formatRemaining(ERKUNDEN_BUSY_MS)}** unterwegs und kannst in dieser Zeit keine andere Dorfaktion starten.${result.levelUpText}`,
-    color: 0x3498db
-  });
-}
-
-async function runFoodBankDeposit(player, interaction) {
-  const busy = getBusyStatus(player);
-  if (busy.isBusy) {
-    return buildBusyPayload(player);
-  }
-
-  if ((Number(player.food) || 0) <= 0) {
-    return buildLockedPayload(
-      '🍖 Keine Nahrung zum Einlagern',
-      'Du hast aktuell keine Nahrung bei dir. Sammle erst Nahrung und lege sie dann in der Dorfkammer ein.'
-    );
-  }
-
-  const deposit = depositVillageFood(player.discord_user_id);
-
-  await syncCampStatusMessage(interaction.client, player.guild_key).catch(() => null);
-
-  return buildActionResultPayload({
-    title: '🏦 Nahrung eingelagert',
-    description:
-      `Du hast **${deposit.deposited} Nahrung** in die Dorfkammer eingelagert.
-
-` +
-      `**Dorfkammer:** ${deposit.villageFood}
-` +
-      `**Dein Nahrungsguthaben:** ${deposit.foodCredit}
-
-` +
-      `Für spätere Expeditionen kannst du nur so viel Nahrung mitnehmen, wie du selbst eingelagert hast.`,
-    color: 0xf39c12
   });
 }
 
@@ -634,24 +615,25 @@ async function runTrainieren(player, interaction) {
     return buildBusyPayload(player);
   }
 
-  const camp = getCampState(player.guild_key).progress;
+  const camp = getCampState().progress;
   if (camp.level < TRAINIEREN_UNLOCK_CAMP_LEVEL) {
     return buildLockedPayload(
       '🔒 Training noch nicht freigeschaltet',
-      `Das Trainingsgelände wird erst ab **Camp-Stufe ${TRAINIEREN_UNLOCK_CAMP_LEVEL}** ausgebaut.
-
-Aktuell ist euer Camp auf **Stufe ${camp.level}**.`
+      `Das Trainingsgelände wird erst ab **Camp-Stufe ${TRAINIEREN_UNLOCK_CAMP_LEVEL}** ausgebaut.\n\nAktuell ist euer Camp auf **Stufe ${camp.level}**.`
     );
   }
+
+  const cooldowns = getActionStatus(player);
+  const { stats } = cooldowns;
 
   const remainingMs = getCooldownRemainingMs(player, 'trainieren_cooldown_until');
   if (remainingMs > 0) {
     return buildCooldownPayload('Trainieren', remainingMs);
   }
 
-  const stats = calculateScaledStats(player.pokemon_key, player.level);
-  const statBonus = Math.floor((stats.kraft + stats.tempo + stats.instinkt) / 10);
-  const xp = randomInt(7, 10) + statBonus;
+  const xp =
+    randomInt(6, 9) +
+    Math.floor(((stats.kraft || 0) + (stats.tempo || 0)) / 8);
 
   const result = await applyProgressWithLevelUpAnnouncement({
     client: interaction.client,
@@ -663,7 +645,7 @@ Aktuell ist euer Camp auf **Stufe ${camp.level}**.`
     xp
   });
 
-  const cooldownUntil = new Date(Date.now() + TRAINIEREN_COOLDOWN_MS).toISOString();
+  const cooldownUntil = new Date(Date.now() + cooldowns.trainierenCooldownMs).toISOString();
   setActionCooldown(player.discord_user_id, 'trainieren', cooldownUntil);
 
   await syncCampStatusMessage(interaction.client, player.guild_key).catch(() => null);
@@ -671,25 +653,20 @@ Aktuell ist euer Camp auf **Stufe ${camp.level}**.`
   return buildActionResultPayload({
     title: '💪 Training abgeschlossen',
     description:
-      `Du hast konzentriert trainiert und dein Pokémon weiterentwickelt.
-
-` +
-      `+${xp} XP
-
-` +
-      `Deine Werte wachsen mit jedem Level weiter.
-` +
-      `Nächstes Training in **${formatRemaining(TRAINIEREN_COOLDOWN_MS)}**.${result.levelUpText}`,
+      `Du hast konzentriert trainiert und dein Pokémon weiterentwickelt.\n\n` +
+      `+${xp} XP\n\n` +
+      `**Kraft** und **Tempo** haben dein Training verbessert.\n` +
+      `Nächstes Training in **${formatRemaining(cooldowns.trainierenCooldownMs)}**.${result.levelUpText}`,
     color: 0x9b59b6
   });
 }
 
-function buildLagerPayload(player) {
-  const { totals, progress: camp, villageFood } = getCampState(player.guild_key);
+function buildLagerPayload() {
+  const { totals, progress: camp } = getCampState();
 
   const campProgressText = camp.isMaxLevel
     ? 'Max-Stufe erreicht'
-    : `${camp.currentInLevel}/${camp.neededForNextLevel} ${camp.progressionLabel} bis Stufe ${camp.nextLevel}`;
+    : `${camp.currentInLevel}/${camp.neededForNextLevel} Beitrag bis Stufe ${camp.nextLevel}`;
 
   return {
     content: '',
@@ -697,40 +674,18 @@ function buildLagerPayload(player) {
       new EmbedBuilder()
         .setTitle('🏕️ Lagerstatus')
         .setDescription(
-          `**Camp-Stufe:** ${camp.level}
-` +
-          `**Phase:** ${camp.phaseLabel}
-` +
-          `**Camp-Fortschritt:** ${campProgressText}
-
-` +
-          `**Abenteurer:** ${totals.players}
-` +
-          `**Gesamt-XP:** ${totals.xp}
-
-` +
-          `**🪵 Holz:** ${totals.wood}
-` +
-          `**🍖 Nahrung (bei Spielern):** ${totals.food}
-` +
-          `**🏦 Dorfkammer:** ${villageFood}
-` +
-          `**🪨 Stein:** ${totals.stone}
-` +
-          `**🏗️ Baufortschritt:** ${totals.contribution}
-` +
-          `**🧭 Erkundungspunkte:** ${totals.exploration_points}
-
-` +
-          `**Freischaltungen**
-` +
-          `Stufe 1: Sammeln, Arbeiten
-` +
-          `Stufe 2: Trainieren
-` +
-          `Stufe 3: Erkunden
-` +
-          `Stufe 4: Expedition`
+          `**Camp-Stufe:** ${camp.level}\n` +
+          `**Camp-Fortschritt:** ${campProgressText}\n\n` +
+          `**Abenteurer:** ${totals.players}\n` +
+          `**Gesamt-XP:** ${totals.xp}\n\n` +
+          `**🪵 Holz:** ${totals.wood}\n` +
+          `**🍖 Nahrung:** ${totals.food}\n` +
+          `**🪨 Stein:** ${totals.stone}\n` +
+          `**🏗️ Gesamtbeitrag:** ${totals.contribution}\n\n` +
+          `**Freischaltungen**\n` +
+          `Stufe 1: Sammeln, Arbeiten\n` +
+          `Stufe 2: Trainieren\n` +
+          `Stufe 3: Erkunden`
         )
         .setColor(0xf1c40f)
     ],
@@ -826,18 +781,8 @@ module.exports = {
         return true;
       }
 
-      if (value === 'erkunden') {
-        await interaction.editReply(await runErkunden(player, interaction)).catch(() => null);
-        return true;
-      }
-
-      if (value === 'food_bank') {
-        await interaction.editReply(await runFoodBankDeposit(player, interaction)).catch(() => null);
-        return true;
-      }
-
       if (value === 'lager') {
-        await interaction.editReply(buildLagerPayload(player)).catch(() => null);
+        await interaction.editReply(buildLagerPayload()).catch(() => null);
         return true;
       }
 
