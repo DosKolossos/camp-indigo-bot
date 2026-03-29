@@ -27,6 +27,8 @@ function normalizeGuild(input, fallback = {}) {
   const emoji = String(input?.emoji ?? fallback.emoji ?? '🏳️').trim() || '🏳️';
   const description = String(input?.description ?? fallback.description ?? '').trim();
   const roleName = String(input?.roleName ?? input?.role_name ?? fallback.roleName ?? name).trim() || name;
+  const chatChannelId = String(input?.chatChannelId ?? input?.chat_channel_id ?? fallback.chatChannelId ?? '').trim() || null;
+  const progressChannelId = String(input?.progressChannelId ?? input?.progress_channel_id ?? fallback.progressChannelId ?? '').trim() || null;
 
   return {
     key,
@@ -34,7 +36,9 @@ function normalizeGuild(input, fallback = {}) {
     emoji,
     description,
     color: normalizeColor(input?.color, normalizeColor(fallback.color, 0x5865f2)),
-    roleName
+    roleName,
+    chatChannelId,
+    progressChannelId
   };
 }
 

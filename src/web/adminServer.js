@@ -1,6 +1,6 @@
 const express = require('express');
 const starters = require('../config/starters');
-const guilds = require('../config/guilds');
+const { getGuilds, getGuildByKey, upsertGuild, deleteGuildByKey } = require('../services/guildService');
 const {
   allPlayers,
   getPlayerById,
@@ -123,6 +123,69 @@ function startAdminServer() {
       players: allPlayers(),
       totals: getCampTotals()
     });
+  });
+
+  app.get('/admin/guilds', (req, res) => {
+    const guilds = getGuilds();
+    const notice = req.query.notice ? String(req.query.notice) : '';
+    const message = req.query.message ? String(req.query.message) : '';
+
+    res.send(renderLayout({
+      title: 'Gilden verwalten',
+      body: renderGuildDashboard(guilds, notice, message)
+    }));
+  });
+
+  app.get('/admin/guild/:key', (req, res) => {
+    const guild = getGuildByKey(String(req.params.key));
+    if (!guild) {
+      return res.redirect('/admin/guilds?notice=error&message=' + encodeURIComponent('Gilde nicht gefunden.'));
+    }
+
+    return res.send(renderLayout({
+      title: `Gilde bearbeiten – ${guild.name}`,
+      body: renderGuildEditor(guild)
+    }));
+  });
+
+  app.get('/admin/guild-new', (_req, res) => {
+    return res.send(renderLayout({
+      title: 'Neue Gilde anlegen',
+      body: renderGuildEditor({
+        key: '',
+        name: '',
+        emoji: '🏳️',
+        description: '',
+        color: 0x5865f2,
+        roleName: '',
+        chatChannelId: '',
+        progressChannelId: ''
+      }, true)
+    }));
+  });
+
+  app.post('/admin/guild', (req, res) => {
+    try {
+      upsertGuild({
+        key: req.body.key,
+        name: req.body.name,
+        emoji: req.body.emoji,
+        description: req.body.description,
+        color: req.body.color,
+        roleName: req.body.roleName,
+        chatChannelId: req.body.chatChannelId,
+        progressChannelId: req.body.progressChannelId
+      });
+
+      return res.redirect('/admin/guilds?notice=success&message=' + encodeURIComponent('Gilde gespeichert.'));
+    } catch (error) {
+      return res.redirect('/admin/guilds?notice=error&message=' + encodeURIComponent(error.message || 'Gilde konnte nicht gespeichert werden.'));
+    }
+  });
+
+  app.post('/admin/guild/:key/delete', (req, res) => {
+    deleteGuildByKey(String(req.params.key));
+    return res.redirect('/admin/guilds?notice=success&message=' + encodeURIComponent('Gilde gelöscht.'));
   });
 
   const server = app.listen(port, host, () => {
@@ -296,10 +359,11 @@ function renderDashboard(players, totals, notice, message) {
     <div class="subtitle">Spielstände, Cooldowns und Testverwaltung</div>
   </div>
 
-  <div class="actions">
-    <a href="/admin" class="btn btn-primary">Aktualisieren</a>
-    <a href="/admin/export.json" class="btn">JSON-Export</a>
-  </div>
+<div class="actions">
+  <a href="/admin" class="btn btn-primary">Aktualisieren</a>
+  <a href="/admin/guilds" class="btn">Gilden verwalten</a>
+  <a href="/admin/export.json" class="btn">JSON-Export</a>
+</div>
 </div>
     ${noticeHtml}
     <div class="panel">
@@ -391,8 +455,8 @@ function renderPlayerEditor(player) {
     <option value="${escapeHtml(starter.key)}" ${starter.key === player.pokemon_key ? 'selected' : ''}>${escapeHtml(starter.name)} (${escapeHtml(starter.key)})</option>
   `).join('');
 
-  const optionsGuilds = guilds.map(guild => `
-    <option value="${escapeHtml(guild.key)}" ${guild.key === player.guild_key ? 'selected' : ''}>${escapeHtml(guild.name)} (${escapeHtml(guild.key)})</option>
+  const optionsGuilds = getGuilds().map(guild => `
+  <option value="${escapeHtml(guild.key)}" ${guild.key === player.guild_key ? 'selected' : ''}>${escapeHtml(guild.name)} (${escapeHtml(guild.key)})</option>
   `).join('');
 
   return `
@@ -493,6 +557,119 @@ function renderPlayerEditor(player) {
   `;
 }
 
+function renderGuildDashboard(guilds, notice, message) {
+  const noticeHtml = message
+    ? `<div class="notice ${escapeHtml(notice || 'success')}">${escapeHtml(message)}</div>`
+    : '';
+
+  const rows = guilds.length
+    ? guilds.map(guild => `
+      <tr>
+        <td><strong>${escapeHtml(guild.name)}</strong><br /><span class="muted">${escapeHtml(guild.key)}</span></td>
+        <td>${escapeHtml(guild.emoji || '')}</td>
+        <td>${escapeHtml(guild.roleName || guild.name)}</td>
+        <td>${escapeHtml(String(guild.color ?? ''))}</td>
+        <td>${escapeHtml(guild.chatChannelId || '-')}</td>
+        <td>${escapeHtml(guild.progressChannelId || '-')}</td>
+        <td>${escapeHtml(guild.description || '-')}</td>
+        <td>
+          <div class="actions">
+            <a class="btn btn-primary" href="/admin/guild/${encodeURIComponent(guild.key)}">Bearbeiten</a>
+            <form class="inline" method="post" action="/admin/guild/${encodeURIComponent(guild.key)}/delete" onsubmit="return confirm('Gilde ${escapeHtmlJs(guild.name)} wirklich löschen?');">
+              <button class="btn btn-danger" type="submit">Löschen</button>
+            </form>
+          </div>
+        </td>
+      </tr>
+    `).join('')
+    : '<tr><td colspan="8" class="muted">Keine Gilden vorhanden.</td></tr>';
+
+  return `
+    <div class="topbar">
+      <div>
+        <div class="title">Gilden verwalten</div>
+        <div class="subtitle"><a href="/admin">← Zur Übersicht</a> · Anlegen, bearbeiten und löschen</div>
+      </div>
+      <div class="actions">
+        <a href="/admin/guild-new" class="btn btn-primary">Neue Gilde</a>
+      </div>
+    </div>
+    ${noticeHtml}
+    <div class="panel">
+      <table>
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Emoji</th>
+            <th>Rollenname</th>
+            <th>Farbe</th>
+            <th>Chat-Channel</th>
+            <th>Progress-Channel</th>
+            <th>Beschreibung</th>
+            <th>Aktionen</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+  `;
+}
+
+function renderGuildEditor(guild, isNew = false) {
+  const title = isNew ? 'Neue Gilde anlegen' : `Gilde bearbeiten – ${guild.name}`;
+
+  return `
+    <div class="topbar">
+      <div>
+        <div class="title">${escapeHtml(title)}</div>
+        <div class="subtitle"><a href="/admin/guilds">← Zu den Gilden</a></div>
+      </div>
+      ${isNew ? '' : `<div class="pill">${escapeHtml(guild.key)}</div>`}
+    </div>
+    <div class="panel">
+      <form method="post" action="/admin/guild">
+        <div class="form-grid">
+          <div>
+            <label>Key</label>
+            <input type="text" name="key" value="${escapeHtml(guild.key || '')}" ${isNew ? 'required' : 'readonly'} />
+          </div>
+          <div>
+            <label>Name</label>
+            <input type="text" name="name" value="${escapeHtml(guild.name || '')}" required />
+          </div>
+          <div>
+            <label>Emoji</label>
+            <input type="text" name="emoji" value="${escapeHtml(guild.emoji || '')}" />
+          </div>
+          <div>
+            <label>Rollenname</label>
+            <input type="text" name="roleName" value="${escapeHtml(guild.roleName || '')}" />
+          </div>
+          <div>
+            <label>Farbe (Hex, z. B. #4f86f7)</label>
+            <input type="text" name="color" value="${escapeHtml(formatColorInput(guild.color))}" />
+          </div>
+          <div>
+            <label>Chat-Channel-ID</label>
+            <input type="text" name="chatChannelId" value="${escapeHtml(guild.chatChannelId || '')}" />
+          </div>
+          <div>
+            <label>Progress-Channel-ID</label>
+            <input type="text" name="progressChannelId" value="${escapeHtml(guild.progressChannelId || '')}" />
+          </div>
+          <div style="grid-column: 1 / -1;">
+            <label>Beschreibung</label>
+            <input type="text" name="description" value="${escapeHtml(guild.description || '')}" />
+          </div>
+        </div>
+        <div class="actions">
+          <button class="btn btn-primary" type="submit">Speichern</button>
+        </div>
+      </form>
+    </div>
+  `;
+}
+
 function renderNoticeFromLocation() {
   return '';
 }
@@ -501,9 +678,7 @@ function getStarterByKey(key) {
   return starters.find(starter => starter.key === key) || null;
 }
 
-function getGuildByKey(key) {
-  return guilds.find(guild => guild.key === key) || null;
-}
+
 
 function getStarterLabel(player) {
   const starter = getStarterByKey(player.pokemon_key);
@@ -566,6 +741,18 @@ function escapeHtml(value) {
 
 function escapeHtmlJs(value) {
   return String(value ?? '').replaceAll('"', '\\"').replaceAll("'", "\\'");
+}
+
+
+
+function formatColorInput(value) {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return '#' + value.toString(16).padStart(6, '0');
+  }
+  
+  const raw = String(value ?? '').trim();
+  if (!raw) return '';
+  return raw.startsWith('#') ? raw : `#${raw.replace(/^0x/i, '')}`;
 }
 
 module.exports = { startAdminServer };
