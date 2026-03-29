@@ -27,6 +27,15 @@ function getGuild(key) {
   return guilds.find(guild => guild.key === key) || guilds[0];
 }
 
+function getActionsChannelMention() {
+  const channelId =
+    process.env.ACTIONS_CHANNEL_ID ||
+    process.env.CAMP_ACTIONS_CHANNEL_ID ||
+    process.env.CAMP_ACTIONS_MESSAGE_CHANNEL_ID;
+
+  return channelId ? `<#${channelId}>` : '#aktionen';
+}
+
 function buildStatsText(stats) {
   return [
     `**Kraft:** ${stats.kraft}`,
@@ -194,7 +203,7 @@ module.exports = {
         });
 
         await syncCampStatusMessage(interaction.client, guild.key).catch(() => null);
-        
+
         const chatChannel = await fetchGuildChatChannel(interaction.client, guild.key).catch(() => null);
         if (chatChannel) {
           await chatChannel.send({ content: buildWelcomeMessage(player) }).catch(() => null);
@@ -213,12 +222,12 @@ module.exports = {
           { level: 'info' }
         );
 
+        const actionsChannelMention = getActionsChannelMention();
+
         return interaction.update({
           content:
-            `✅ Willkommen in **Camp Indigo**!\n` +
-            `Dein Pokémon: **${starter.name}**\n` +
-            `Deine Gilde: **${guild.name}** ${guild.emoji}\n\n` +
-            'Nutze jetzt die Aktionsnachricht im Chat, um deine ersten Aufgaben zu erledigen.',
+            '✅ Du bist nun startklar! 🎉\n' +
+            `Und jetzt lass dein Pokémon einen Beitrag zum Dorf leisten -> ${actionsChannelMention}`,
           embeds: [],
           components: [],
           files: []
