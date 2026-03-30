@@ -431,6 +431,16 @@ function getTopContributorLast24Hours(guildKey = null) {
     : db.prepare(sql).get(since);
 }
 
+function resetCampToStage3() {
+  db.prepare(`
+    UPDATE players
+    SET exploration_points = 0,
+        busy_until = NULL,
+        busy_activity = NULL,
+        updated_at = ?
+  `).run(new Date().toISOString());
+}
+
 module.exports = {
   ACTION_COOLDOWN_FIELDS,
   getPlayerByDiscordUserId,
@@ -450,5 +460,6 @@ module.exports = {
   clearBusyState,
   logPlayerActivity,
   getTopContributorLast24Hours,
-  setPlayerBusy
+  setPlayerBusy,
+  resetCampToStage3
 };

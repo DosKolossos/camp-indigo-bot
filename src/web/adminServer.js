@@ -9,7 +9,8 @@ const {
   deletePlayerById,
   deleteAllPlayers,
   resetPlayerCooldowns,
-  resetAllCooldowns
+  resetAllCooldowns,
+  resetCampToStage3
 } = require('../services/playerService');
 
 function startAdminServer() {
@@ -73,6 +74,8 @@ function startAdminServer() {
       return res.redirect('/admin?notice=error&message=' + encodeURIComponent('Spielstand nicht gefunden.'));
     }
 
+
+
     updatePlayerAdmin(id, {
       discord_username: req.body.discord_username,
       pokemon_key: req.body.pokemon_key,
@@ -82,11 +85,17 @@ function startAdminServer() {
       food: req.body.food,
       stone: req.body.stone,
       contribution: req.body.contribution,
+      exploration_points: req.body.exploration_points,
       sammeln_cooldown_until: req.body.sammeln_cooldown_until,
       arbeiten_cooldown_until: req.body.arbeiten_cooldown_until
     });
 
     return res.redirect('/admin/player/' + id + '?notice=success&message=' + encodeURIComponent('Spielstand gespeichert.'));
+  });
+
+  app.post('/admin/camp/reset-stage-3', (_req, res) => {
+    resetCampToStage3();
+    return res.redirect('/admin?notice=success&message=' + encodeURIComponent('Camp wurde auf Stufe 3 zurückgesetzt.'));
   });
 
   app.post('/admin/player/:id/delete', (req, res) => {
@@ -388,6 +397,9 @@ function renderDashboard(players, totals, notice, message) {
           <form class="inline" method="post" action="/admin/players/delete-all" onsubmit="return confirm('Wirklich ALLE Spielstände löschen?');">
             <button class="btn btn-danger" type="submit">Alle Spielstände löschen</button>
           </form>
+          <form class="inline" method="post" action="/admin/camp/reset-stage-3" onsubmit="return confirm('Camp wirklich auf Stufe 3 zurücksetzen?');">
+  <button class="btn btn-warning" type="submit">Camp auf Stufe 3 zurücksetzen</button>
+</form>
         </div>
       </div>
       <table>
@@ -519,6 +531,10 @@ function renderPlayerEditor(player) {
           <div>
             <label>Arbeiten-Cooldown bis</label>
             <input type="datetime-local" name="arbeiten_cooldown_until" value="${escapeHtml(arbeitenValue)}" />
+          </div>
+          <div>
+            <label>Erkundungspunkte</label>
+            <input type="number" min="0" name="exploration_points" value="${player.exploration_points || 0}" required />
           </div>
         </div>
         <div class="actions">
@@ -749,7 +765,7 @@ function formatColorInput(value) {
   if (typeof value === 'number' && Number.isFinite(value)) {
     return '#' + value.toString(16).padStart(6, '0');
   }
-  
+
   const raw = String(value ?? '').trim();
   if (!raw) return '';
   return raw.startsWith('#') ? raw : `#${raw.replace(/^0x/i, '')}`;
