@@ -13,7 +13,8 @@ const {
   getPlayerByDiscordUserId,
   getCampTotals,
   setActionCooldown,
-  logPlayerActivity
+  logPlayerActivity,
+  setPlayerBusy
 } = require('../services/playerService');
 const { applyProgressWithLevelUpAnnouncement } = require('../services/levelUpService');
 const { syncCampStatusMessage } = require('../services/campStatusService');
@@ -37,6 +38,7 @@ const TRAINIEREN_UNLOCK_CAMP_LEVEL = 2;
 const ERKUNDEN_UNLOCK_CAMP_LEVEL = 3;
 const SCHMIEDE_UNLOCK_CAMP_LEVEL = 4;
 const EXPEDITION_UNLOCK_CAMP_LEVEL = 4;
+const ERKUNDEN_BUSY_MS = 60 * 60 * 1000;
 
 function parseDurationMs(envValue, fallback, multiplier = 1) {
   const numericValue = Number(envValue);
@@ -632,7 +634,12 @@ function buildActionMenu(player) {
 
   const menu = new StringSelectMenuBuilder()
     .setCustomId('camp:actions:menu')
-    .setPlaceholder('Aktion auswählen')
+    .setPlaceholder(
+      busy.isBusy
+        ? `Unterwegs: ${getBusyActivityLabel(busy.activityKey)}`
+        : 'Aktion auswählen'
+    )
+    .setDisabled(busy.isBusy)
     .addOptions(actionOptions);
 
   return {
@@ -859,6 +866,7 @@ async function runTrainieren(player, interaction) {
   });
 }
 
+
 async function runErkunden(player, interaction) {
   const busy = getBusyStatus(player);
   if (busy.isBusy) {
@@ -874,22 +882,15 @@ async function runErkunden(player, interaction) {
   }
 
   const stats = getPlayerStats(player);
-
   const explorationPoints =
-    randomInt(8, 14) +
-    Math.floor(((stats.instinkt || 0) + (stats.geschick || 0)) / 6);
+    randomInt(4, 7) +
+    Math.floor(((stats.instinkt || 0) + (stats.geschick || 0)) / 10);
 
   const xp =
     randomInt(4, 7) +
     Math.floor((stats.tempo || 0) / 6);
 
   const foodCost = 1;
-
-  // Ab Camp-Stufe 4 kleine Materialchance
-  const campLevel = camp.level;
-  const ore = campLevel >= 4 ? randomInt(0, 1) : 0;
-  const fiber = campLevel >= 4 ? randomInt(0, 1) : 0;
-  const scrap = campLevel >= 4 ? randomInt(0, 1) : 0;
 
   if ((player.food || 0) < foodCost) {
     return buildLockedPayload(
@@ -898,41 +899,37 @@ async function runErkunden(player, interaction) {
     );
   }
 
-  const changes = {
-    food: -foodCost,
-    exploration_points: explorationPoints,
-    xp
-  };
-
-  if (campLevel >= 4) {
-    changes.ore = ore;
-    changes.fiber = fiber;
-    changes.scrap = scrap;
-  }
-
   const result = await applyProgressWithLevelUpAnnouncement({
     client: interaction.client,
     discordUserId: player.discord_user_id,
-    changes
+    changes: {
+      food: -foodCost,
+      exploration_points: explorationPoints,
+      xp
+    }
   });
 
-  logPlayerActivity(player.discord_user_id, 'erkunden', changes);
+  const busyUntil = new Date(Date.now() + ERKUNDEN_BUSY_MS).toISOString();
+  setPlayerBusy(player.discord_user_id, 'erkunden', busyUntil);
+
+  logPlayerActivity(player.discord_user_id, 'erkunden', {
+    food: -foodCost,
+    exploration_points: explorationPoints,
+    xp,
+    busy_until: busyUntil
+  });
 
   await syncCampStatusMessage(interaction.client, player.guild_key).catch(() => null);
 
-  const materialText = campLevel >= 4
-    ? `\n+${ore} Erz\n+${fiber} Fasern\n+${scrap} Schrott\n`
-    : '\n';
-
   return buildActionResultPayload({
-    title: '🧭 Erkundung abgeschlossen',
+    title: '🧭 Erkundung gestartet',
     description:
-      `Du hast die Umgebung des Camps erkundet.\n\n` +
+      `Du machst dich auf den Weg und bist jetzt für **1 Stunde** unterwegs.\n\n` +
       `-${foodCost} Nahrung\n` +
       `+${explorationPoints} Erkundungspunkte\n` +
-      `+${xp} XP` +
-      materialText +
-      `\n**Instinkt** und **Geschick** haben deine Erkundung verbessert.${result.levelUpText}`,
+      `+${xp} XP\n\n` +
+      `Rückkehr in **${formatRemaining(ERKUNDEN_BUSY_MS)}**.` +
+      `${result.levelUpText}`,
     color: 0x3498db
   });
 }

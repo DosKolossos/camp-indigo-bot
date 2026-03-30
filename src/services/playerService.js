@@ -229,6 +229,14 @@ function resetPlayerCooldowns(discordUserId) {
   return getPlayerByDiscordUserId(discordUserId);
 }
 
+function setPlayerBusy(discordUserId, activityKey, busyUntil) {
+  db.prepare(`
+    UPDATE players
+    SET busy_until = ?, busy_activity = ?
+    WHERE discord_user_id = ?
+  `).run(busyUntil, activityKey, discordUserId);
+}
+
 function resetAllCooldowns() {
   db.prepare(`
     UPDATE players
@@ -441,5 +449,6 @@ module.exports = {
   setBusyState,
   clearBusyState,
   logPlayerActivity,
-  getTopContributorLast24Hours
+  getTopContributorLast24Hours,
+  setPlayerBusy
 };
