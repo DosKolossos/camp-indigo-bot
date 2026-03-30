@@ -21,6 +21,12 @@ ensurePlayerColumn('busy_until', 'TEXT');
 ensurePlayerColumn('busy_activity', 'TEXT');
 ensurePlayerColumn('exploration_points', 'INTEGER NOT NULL DEFAULT 0');
 ensurePlayerColumn('food_credit', 'INTEGER NOT NULL DEFAULT 0');
+ensurePlayerColumn('ore', 'INTEGER NOT NULL DEFAULT 0');
+ensurePlayerColumn('fiber', 'INTEGER NOT NULL DEFAULT 0');
+ensurePlayerColumn('scrap', 'INTEGER NOT NULL DEFAULT 0');
+ensurePlayerColumn('weapon_tier', 'INTEGER NOT NULL DEFAULT 0');
+ensurePlayerColumn('armor_tier', 'INTEGER NOT NULL DEFAULT 0');
+ensurePlayerColumn('scanner_tier', 'INTEGER NOT NULL DEFAULT 0');
 
 function getPlayerByDiscordUserId(discordUserId) {
   return db.prepare(`
@@ -108,6 +114,36 @@ function updatePlayerProgress(discordUserId, changes = {}) {
     values.push(changes.food_credit);
   }
 
+  if (typeof changes.ore === 'number') {
+    fields.push('ore = MAX(0, ore + ?)');
+    values.push(changes.ore);
+  }
+
+  if (typeof changes.fiber === 'number') {
+    fields.push('fiber = MAX(0, fiber + ?)');
+    values.push(changes.fiber);
+  }
+
+  if (typeof changes.scrap === 'number') {
+    fields.push('scrap = MAX(0, scrap + ?)');
+    values.push(changes.scrap);
+  }
+
+  if (typeof changes.weapon_tier === 'number') {
+    fields.push('weapon_tier = MAX(0, weapon_tier + ?)');
+    values.push(changes.weapon_tier);
+  }
+
+  if (typeof changes.armor_tier === 'number') {
+    fields.push('armor_tier = MAX(0, armor_tier + ?)');
+    values.push(changes.armor_tier);
+  }
+
+  if (typeof changes.scanner_tier === 'number') {
+    fields.push('scanner_tier = MAX(0, scanner_tier + ?)');
+    values.push(changes.scanner_tier);
+  }
+
   fields.push('updated_at = ?');
   values.push(new Date().toISOString());
   values.push(discordUserId);
@@ -150,6 +186,9 @@ function getCampTotals(guildKey = null) {
       COALESCE(SUM(contribution), 0) as contribution,
       COALESCE(SUM(exploration_points), 0) as exploration_points,
       COALESCE(SUM(food_credit), 0) as food_credit,
+      COALESCE(SUM(ore), 0) as ore,
+      COALESCE(SUM(fiber), 0) as fiber,
+      COALESCE(SUM(scrap), 0) as scrap,
       COALESCE(SUM(xp), 0) as xp
     FROM players
     ${guildKey ? 'WHERE guild_key = ?' : ''}
@@ -255,6 +294,12 @@ function updatePlayerAdmin(id, payload = {}) {
   nextPlayer.food_credit = Number.isFinite(Number(nextPlayer.food_credit))
     ? Math.max(0, Number(nextPlayer.food_credit))
     : currentPlayer.food_credit;
+  nextPlayer.ore = Number.isFinite(Number(nextPlayer.ore)) ? Math.max(0, Number(nextPlayer.ore)) : currentPlayer.ore;
+  nextPlayer.fiber = Number.isFinite(Number(nextPlayer.fiber)) ? Math.max(0, Number(nextPlayer.fiber)) : currentPlayer.fiber;
+  nextPlayer.scrap = Number.isFinite(Number(nextPlayer.scrap)) ? Math.max(0, Number(nextPlayer.scrap)) : currentPlayer.scrap;
+  nextPlayer.weapon_tier = Number.isFinite(Number(nextPlayer.weapon_tier)) ? Math.max(0, Number(nextPlayer.weapon_tier)) : currentPlayer.weapon_tier;
+  nextPlayer.armor_tier = Number.isFinite(Number(nextPlayer.armor_tier)) ? Math.max(0, Number(nextPlayer.armor_tier)) : currentPlayer.armor_tier;
+  nextPlayer.scanner_tier = Number.isFinite(Number(nextPlayer.scanner_tier)) ? Math.max(0, Number(nextPlayer.scanner_tier)) : currentPlayer.scanner_tier;
 
   const now = new Date().toISOString();
 
@@ -271,6 +316,12 @@ function updatePlayerAdmin(id, payload = {}) {
         contribution = ?,
         exploration_points = ?,
         food_credit = ?,
+        ore = ?,
+        fiber = ?,
+        scrap = ?,
+        weapon_tier = ?,
+        armor_tier = ?,
+        scanner_tier = ?,
         sammeln_cooldown_until = ?,
         arbeiten_cooldown_until = ?,
         trainieren_cooldown_until = ?,
@@ -290,6 +341,12 @@ function updatePlayerAdmin(id, payload = {}) {
     nextPlayer.contribution,
     nextPlayer.exploration_points,
     nextPlayer.food_credit,
+    nextPlayer.ore,
+    nextPlayer.fiber,
+    nextPlayer.scrap,
+    nextPlayer.weapon_tier,
+    nextPlayer.armor_tier,
+    nextPlayer.scanner_tier,
     normalizeNullableDate(nextPlayer.sammeln_cooldown_until),
     normalizeNullableDate(nextPlayer.arbeiten_cooldown_until),
     normalizeNullableDate(nextPlayer.trainieren_cooldown_until),

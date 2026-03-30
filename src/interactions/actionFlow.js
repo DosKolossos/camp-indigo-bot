@@ -22,6 +22,12 @@ const {
   getCampProgress,
   calculateScaledStats
 } = require('../services/progressionService');
+const {
+  EQUIPMENT_MAX_TIER,
+  EQUIPMENT_LABELS,
+  EQUIPMENT_TIER_NAMES,
+  CRAFTING_RECIPES
+} = require('../config/crafting');
 
 const SAMMELN_COOLDOWN_MS = parseDurationMs(process.env.SAMMELN_COOLDOWN_MINUTES, 10 * 60 * 1000, 60 * 1000);
 const ARBEITEN_COOLDOWN_MS = parseDurationMs(process.env.ARBEITEN_COOLDOWN_MINUTES, 8 * 60 * 1000, 60 * 1000);
@@ -29,6 +35,7 @@ const TRAINIEREN_COOLDOWN_MS = parseDurationMs(process.env.TRAINIEREN_COOLDOWN_M
 
 const TRAINIEREN_UNLOCK_CAMP_LEVEL = 2;
 const ERKUNDEN_UNLOCK_CAMP_LEVEL = 3;
+const SCHMIEDE_UNLOCK_CAMP_LEVEL = 4;
 const EXPEDITION_UNLOCK_CAMP_LEVEL = 4;
 
 function parseDurationMs(envValue, fallback, multiplier = 1) {
@@ -226,7 +233,10 @@ function getActionStatus(player) {
 
 function getCampState() {
   const totals = getCampTotals();
-  const progress = getCampProgress(totals.contribution);
+  const progress = getCampProgress({
+    contribution: totals.contribution,
+    exploration_points: totals.exploration_points
+  });
 
   return { totals, progress };
 }
@@ -236,6 +246,14 @@ function getUnlockedActionKeys(campLevel) {
 
   if (campLevel >= TRAINIEREN_UNLOCK_CAMP_LEVEL) {
     keys.push('trainieren');
+  }
+
+  if (campLevel >= ERKUNDEN_UNLOCK_CAMP_LEVEL) {
+    keys.push('erkunden');
+  }
+
+  if (campLevel >= SCHMIEDE_UNLOCK_CAMP_LEVEL) {
+    keys.push('schmiede', 'expedition');
   }
 
   return keys;
@@ -250,14 +268,14 @@ function getNextUnlockHint(campLevel) {
     return `🔒 Nächste Freischaltung: **Erkunden** ab Camp-Stufe ${ERKUNDEN_UNLOCK_CAMP_LEVEL}`;
   }
 
-  if (campLevel < EXPEDITION_UNLOCK_CAMP_LEVEL) {
-    return `🔒 Nächste Freischaltung: **Expedition** ab Camp-Stufe ${EXPEDITION_UNLOCK_CAMP_LEVEL}`;
+  if (campLevel < SCHMIEDE_UNLOCK_CAMP_LEVEL) {
+    return `🔒 Nächste Freischaltung: **Schmiede & Expedition** ab Camp-Stufe ${SCHMIEDE_UNLOCK_CAMP_LEVEL}`;
   }
 
   return '✨ Alle aktuell eingebauten Camp-Aktionen sind freigeschaltet.';
 }
 
-function buildActionOptions({ busy, cooldowns, trainingUnlocked }) {
+function buildActionOptions({ busy, cooldowns, trainingUnlocked, erkundenUnlocked, forgeUnlocked, expeditionUnlocked }) {
   const options = [
     {
       label: 'Profil ansehen',
@@ -297,6 +315,37 @@ function buildActionOptions({ busy, cooldowns, trainingUnlocked }) {
           : 'Steigere deine Werte über XP',
       value: 'trainieren',
       emoji: '💪'
+    });
+  }
+
+  if (erkundenUnlocked) {
+    options.push({
+      label: 'Erkunden',
+      description: busy.isBusy
+        ? `Gesperrt: Du bist auf ${getBusyActivityLabel(busy.activityKey)}`
+        : 'Verdiene Erkundungspunkte und finde Materialien',
+      value: 'erkunden',
+      emoji: '🧭'
+    });
+  }
+
+  if (forgeUnlocked) {
+    options.push({
+      label: 'Schmiede',
+      description: 'Baue Waffen, Rüstungen und Suchgeräte',
+      value: 'schmiede',
+      emoji: '⚒️'
+    });
+  }
+
+  if (expeditionUnlocked) {
+    options.push({
+      label: 'Expedition',
+      description: busy.isBusy
+        ? `Gesperrt: Du bist auf ${getBusyActivityLabel(busy.activityKey)}`
+        : 'Bestehe gefährliche Ausflüge für bessere Beute',
+      value: 'expedition',
+      emoji: '🗺️'
     });
   }
 
@@ -353,14 +402,192 @@ function buildCooldownPayload(actionLabel, remainingMs) {
   });
 }
 
+function getEquipmentTierName(fieldName, tier) {
+  return EQUIPMENT_TIER_NAMES[fieldName]?.[tier] || `Tier ${tier}`;
+}
+
+function getPlayerCombatPower(player) {
+  const stats = getPlayerStats(player);
+
+  return (
+    (player.level || 1) +
+    Math.floor((stats.kraft || 0) * 1.4) +
+    Math.floor((stats.tempo || 0) * 0.6) +
+    ((player.weapon_tier || 0) * 4) +
+    ((player.armor_tier || 0) * 3)
+  );
+}
+
+function getPlayerLootBonus(player) {
+  const stats = getPlayerStats(player);
+  return ((player.scanner_tier || 0) * 12) + Math.floor((stats.instinkt || 0) / 2);
+}
+
+function formatRecipeCost(costs = {}) {
+  const labels = {
+    wood: 'Holz',
+    stone: 'Stein',
+    food: 'Nahrung',
+    ore: 'Erz',
+    fiber: 'Fasern',
+    scrap: 'Schrott'
+  };
+
+  return Object.entries(costs)
+    .filter(([, amount]) => Number(amount) > 0)
+    .map(([key, amount]) => `${amount} ${labels[key] || key}`)
+    .join(', ');
+}
+
+function canAffordCosts(player, costs = {}) {
+  return Object.entries(costs).every(([key, amount]) => (Number(player[key]) || 0) >= (Number(amount) || 0));
+}
+
+function buildForgeButtons(player) {
+  const weaponTier = Number(player.weapon_tier) || 0;
+  const armorTier = Number(player.armor_tier) || 0;
+  const scannerTier = Number(player.scanner_tier) || 0;
+
+  return [
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId('camp:forge:weapon')
+        .setLabel(weaponTier >= EQUIPMENT_MAX_TIER ? 'Waffe max' : 'Waffe schmieden')
+        .setStyle(ButtonStyle.Primary)
+        .setDisabled(weaponTier >= EQUIPMENT_MAX_TIER),
+      new ButtonBuilder()
+        .setCustomId('camp:forge:armor')
+        .setLabel(armorTier >= EQUIPMENT_MAX_TIER ? 'Rüstung max' : 'Rüstung schmieden')
+        .setStyle(ButtonStyle.Secondary)
+        .setDisabled(armorTier >= EQUIPMENT_MAX_TIER),
+      new ButtonBuilder()
+        .setCustomId('camp:forge:scanner')
+        .setLabel(scannerTier >= EQUIPMENT_MAX_TIER ? 'Suchgerät max' : 'Suchgerät bauen')
+        .setStyle(ButtonStyle.Success)
+        .setDisabled(scannerTier >= EQUIPMENT_MAX_TIER)
+    ),
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId('camp:actions:back')
+        .setLabel('Zurück zum Aktionsmenü')
+        .setStyle(ButtonStyle.Secondary)
+    )
+  ];
+}
+
+function buildForgePayload(player) {
+  const weaponTier = Number(player.weapon_tier) || 0;
+  const armorTier = Number(player.armor_tier) || 0;
+  const scannerTier = Number(player.scanner_tier) || 0;
+
+  const nextWeaponTier = Math.min(weaponTier + 1, EQUIPMENT_MAX_TIER);
+  const nextArmorTier = Math.min(armorTier + 1, EQUIPMENT_MAX_TIER);
+  const nextScannerTier = Math.min(scannerTier + 1, EQUIPMENT_MAX_TIER);
+
+  const embed = new EmbedBuilder()
+    .setTitle('⚒️ Werkbank & Schmiede')
+    .setDescription(
+      `**Aktuelle Ausrüstung**\n` +
+      `Waffe: ${getEquipmentTierName('weapon_tier', weaponTier)}\n` +
+      `Rüstung: ${getEquipmentTierName('armor_tier', armorTier)}\n` +
+      `Suchgerät: ${getEquipmentTierName('scanner_tier', scannerTier)}\n\n` +
+      `**Materialien**\n` +
+      `⛏️ Erz: ${player.ore || 0}\n` +
+      `🧵 Fasern: ${player.fiber || 0}\n` +
+      `🪛 Schrott: ${player.scrap || 0}\n\n` +
+      `**Nächste Rezepte**\n` +
+      `${weaponTier >= EQUIPMENT_MAX_TIER ? 'Waffe: Max-Stufe' : `Waffe T${nextWeaponTier}: ${formatRecipeCost(CRAFTING_RECIPES.weapon_tier[nextWeaponTier])}`}\n` +
+      `${armorTier >= EQUIPMENT_MAX_TIER ? 'Rüstung: Max-Stufe' : `Rüstung T${nextArmorTier}: ${formatRecipeCost(CRAFTING_RECIPES.armor_tier[nextArmorTier])}`}\n` +
+      `${scannerTier >= EQUIPMENT_MAX_TIER ? 'Suchgerät: Max-Stufe' : `Suchgerät T${nextScannerTier}: ${formatRecipeCost(CRAFTING_RECIPES.scanner_tier[nextScannerTier])}`}\n\n` +
+      `Waffen erhöhen deine **Kampfkraft**, Rüstungen geben **Sicherheit**, Suchgeräte verbessern deine **Beute** auf Expeditionen.`
+    )
+    .setColor(0xf39c12);
+
+  return {
+    content: '',
+    embeds: [embed],
+    components: buildForgeButtons(player)
+  };
+}
+
+async function runForgeUpgrade(player, interaction, fieldName) {
+  const busy = getBusyStatus(player);
+  if (busy.isBusy) {
+    return buildBusyPayload(player);
+  }
+
+  const camp = getCampState().progress;
+  if (camp.level < SCHMIEDE_UNLOCK_CAMP_LEVEL) {
+    return buildLockedPayload(
+      '🔒 Schmiede noch nicht freigeschaltet',
+      `Die Werkbank wird erst ab **Camp-Stufe ${SCHMIEDE_UNLOCK_CAMP_LEVEL}** ausgebaut.`
+    );
+  }
+
+  const currentTier = Number(player[fieldName]) || 0;
+  if (currentTier >= EQUIPMENT_MAX_TIER) {
+    return buildLockedPayload(
+      '✨ Bereits maximiert',
+      `${EQUIPMENT_LABELS[fieldName]} ist bereits auf der höchsten Ausbaustufe.`
+    );
+  }
+
+  const nextTier = currentTier + 1;
+  const costs = CRAFTING_RECIPES[fieldName]?.[nextTier];
+  if (!costs) {
+    return buildLockedPayload('⚠️ Rezept fehlt', 'Für diesen Ausbau ist aktuell kein Rezept hinterlegt.');
+  }
+
+  if (!canAffordCosts(player, costs)) {
+    return buildLockedPayload(
+      '📦 Nicht genug Materialien',
+      `Dir fehlen Ressourcen für **${EQUIPMENT_LABELS[fieldName]} T${nextTier}**.\n\nBenötigt: ${formatRecipeCost(costs)}`
+    );
+  }
+
+  const changes = { [fieldName]: 1 };
+  for (const [key, amount] of Object.entries(costs)) {
+    changes[key] = -(Number(amount) || 0);
+  }
+
+  await applyProgressWithLevelUpAnnouncement({
+    client: interaction.client,
+    discordUserId: player.discord_user_id,
+    changes
+  });
+
+  await syncCampStatusMessage(interaction.client, player.guild_key).catch(() => null);
+
+  const refreshedPlayer = getPlayerByDiscordUserId(player.discord_user_id);
+
+  return {
+    content: '',
+    embeds: [
+      new EmbedBuilder()
+        .setTitle('⚒️ Ausbau abgeschlossen')
+        .setDescription(
+          `Deine **${EQUIPMENT_LABELS[fieldName]}** wurde verbessert.\n\n` +
+          `Neue Stufe: **${getEquipmentTierName(fieldName, nextTier)}**\n` +
+          `Verbrauchte Materialien: ${formatRecipeCost(costs)}`
+        )
+        .setColor(0xf39c12)
+    ],
+    components: buildForgeButtons(refreshedPlayer)
+  };
+}
+
 function buildActionMenu(player) {
   const starter = getStarter(player.pokemon_key);
   const guild = getGuild(player.guild_key);
   const cooldowns = getActionStatus(player);
   const busy = getBusyStatus(player);
   const camp = getCampState().progress;
-
   const trainingUnlocked = camp.level >= TRAINIEREN_UNLOCK_CAMP_LEVEL;
+  const erkundenUnlocked = camp.level >= ERKUNDEN_UNLOCK_CAMP_LEVEL;
+  const forgeUnlocked = camp.level >= SCHMIEDE_UNLOCK_CAMP_LEVEL;
+  const expeditionUnlocked = camp.level >= EXPEDITION_UNLOCK_CAMP_LEVEL;
+
+  const nextUnlockHint = getNextUnlockHint(camp.level);
 
   const statusLines = [
     busy.label,
@@ -372,57 +599,17 @@ function buildActionMenu(player) {
     statusLines.push(cooldowns.trainierenLabel);
   }
 
-  const nextUnlockHint = trainingUnlocked
-    ? '✨ Weitere Aktionen folgen mit späteren Camp-Erweiterungen.'
-    : `🔒 Nächste Freischaltung: **Trainieren** ab Camp-Stufe ${TRAINIEREN_UNLOCK_CAMP_LEVEL}`;
-
-  const actionOptions = [
-    {
-      label: 'Profil ansehen',
-      description: 'Zeigt dein Pokémon, deine Gilde und deine Werte',
-      value: 'profil',
-      emoji: '📜'
-    },
-    {
-      label: 'Sammeln',
-      description: busy.isBusy
-        ? `Gesperrt: Du bist auf ${getBusyActivityLabel(busy.activityKey)}`
-        : cooldowns.sammelnRemaining > 0
-          ? `Wieder bereit in ${formatRemaining(cooldowns.sammelnRemaining)}`
-          : 'Sammle Holz, Nahrung, Stein und XP',
-      value: 'sammeln',
-      emoji: '🌿'
-    },
-    {
-      label: 'Arbeiten',
-      description: busy.isBusy
-        ? `Gesperrt: Du bist auf ${getBusyActivityLabel(busy.activityKey)}`
-        : cooldowns.arbeitenRemaining > 0
-          ? `Wieder bereit in ${formatRemaining(cooldowns.arbeitenRemaining)}`
-          : 'Hilf dem Lager beim Ausbau',
-      value: 'arbeiten',
-      emoji: '🔨'
-    }
-  ];
-
-  if (trainingUnlocked) {
-    actionOptions.push({
-      label: 'Trainieren',
-      description: busy.isBusy
-        ? `Gesperrt: Du bist auf ${getBusyActivityLabel(busy.activityKey)}`
-        : cooldowns.trainierenRemaining > 0
-          ? `Wieder bereit in ${formatRemaining(cooldowns.trainierenRemaining)}`
-          : 'Steigere deine Werte über XP',
-      value: 'trainieren',
-      emoji: '💪'
-    });
+  if (forgeUnlocked) {
+    statusLines.push(`⚔️ Kampfkraft: ${getPlayerCombatPower(player)} | 🔎 Beutebonus: +${getPlayerLootBonus(player)}%`);
   }
 
-  actionOptions.push({
-    label: 'Lagerstatus',
-    description: 'Zeigt den Fortschritt des gesamten Camps',
-    value: 'lager',
-    emoji: '🏕️'
+  const actionOptions = buildActionOptions({
+    busy,
+    cooldowns,
+    trainingUnlocked,
+    erkundenUnlocked,
+    forgeUnlocked,
+    expeditionUnlocked
   });
 
   const embed = new EmbedBuilder()
@@ -432,7 +619,7 @@ function buildActionMenu(player) {
       `**Gilde:** ${guild?.name ?? player.guild_key} ${guild?.emoji ?? ''}\n` +
       `**Level:** ${player.level}\n` +
       `**Fortschritt:** ${getXpProgressText(player)}\n` +
-      `**Camp-Stufe:** ${camp.level}\n\n` +
+      `**Camp-Stufe:** ${camp.level} (${camp.phaseLabel})\n\n` +
       `**Status**\n` +
       `${statusLines.join('\n')}\n\n` +
       `${nextUnlockHint}\n\n` +
@@ -478,11 +665,22 @@ function buildProfilePayload(player) {
       `**Fortschritt:** ${progressText}\n\n` +
       `**Aktuelle Werte**\n` +
       `${buildStatsText(stats)}\n` +
-      `**❤️ Max-KP:** ${maxHp}\n\n` +
+      `**❤️ Max-KP:** ${maxHp}\n` +
+      `**⚔️ Kampfkraft:** ${getPlayerCombatPower(player)}\n` +
+      `**🔎 Beutebonus:** +${getPlayerLootBonus(player)}%\n\n` +
+      `**Ressourcen**\n` +
       `**🪵 Holz:** ${player.wood}\n` +
       `**🍖 Nahrung:** ${player.food}\n` +
       `**🪨 Stein:** ${player.stone}\n` +
-      `**🏗️ Lagerbeitrag:** ${player.contribution}\n\n` +
+      `**⛏️ Erz:** ${player.ore || 0}\n` +
+      `**🧵 Fasern:** ${player.fiber || 0}\n` +
+      `**🪛 Schrott:** ${player.scrap || 0}\n` +
+      `**🏗️ Lagerbeitrag:** ${player.contribution}\n` +
+      `**🧭 Erkundungspunkte:** ${player.exploration_points || 0}\n\n` +
+      `**Ausrüstung**\n` +
+      `Waffe: ${getEquipmentTierName('weapon_tier', Number(player.weapon_tier) || 0)}\n` +
+      `Rüstung: ${getEquipmentTierName('armor_tier', Number(player.armor_tier) || 0)}\n` +
+      `Suchgerät: ${getEquipmentTierName('scanner_tier', Number(player.scanner_tier) || 0)}\n\n` +
       `**Status**\n` +
       `${busy.label}\n` +
       `${cooldowns.sammelnLabel}\n` +
@@ -661,12 +859,90 @@ async function runTrainieren(player, interaction) {
   });
 }
 
+async function runExpedition(player, interaction) {
+  const busy = getBusyStatus(player);
+  if (busy.isBusy) {
+    return buildBusyPayload(player);
+  }
+
+  const camp = getCampState().progress;
+  if (camp.level < EXPEDITION_UNLOCK_CAMP_LEVEL) {
+    return buildLockedPayload(
+      '🔒 Expeditionen noch nicht freigeschaltet',
+      `Expeditionen werden erst ab **Camp-Stufe ${EXPEDITION_UNLOCK_CAMP_LEVEL}** möglich.`
+    );
+  }
+
+  const foodCost = 2;
+  if ((player.food || 0) < foodCost) {
+    return buildLockedPayload(
+      '🍖 Nicht genug Nahrung',
+      `Für eine Expedition benötigst du **${foodCost} Nahrung**.`
+    );
+  }
+
+  const combatPower = getPlayerCombatPower(player);
+  const lootBonusPercent = getPlayerLootBonus(player);
+  const expeditionRoll = combatPower + randomInt(1, 12);
+  const difficulty = randomInt(18, 34);
+  const success = expeditionRoll >= difficulty;
+
+  const baseExploration = success ? randomInt(12, 20) : randomInt(4, 8);
+  const xp = success ? randomInt(8, 13) : randomInt(3, 6);
+  const ore = success ? randomInt(1, 2) : randomInt(0, 1);
+  const fiber = success ? randomInt(1, 2) : randomInt(0, 1);
+  const scrap = success ? randomInt(1, 2) : randomInt(0, 1);
+  const bonusRoll = randomInt(1, 100);
+  const bonusHit = bonusRoll <= lootBonusPercent;
+  const bonusOre = bonusHit ? 1 : 0;
+  const bonusFiber = bonusHit ? 1 : 0;
+  const bonusScrap = bonusHit ? 1 : 0;
+
+  const result = await applyProgressWithLevelUpAnnouncement({
+    client: interaction.client,
+    discordUserId: player.discord_user_id,
+    changes: {
+      food: -foodCost,
+      exploration_points: baseExploration,
+      xp,
+      ore: ore + bonusOre,
+      fiber: fiber + bonusFiber,
+      scrap: scrap + bonusScrap
+    }
+  });
+
+  logPlayerActivity(player.discord_user_id, 'expedition', {
+    food: -foodCost,
+    exploration_points: baseExploration,
+    xp
+  });
+
+  await syncCampStatusMessage(interaction.client, player.guild_key).catch(() => null);
+
+  return buildActionResultPayload({
+    title: success ? '🗺️ Expedition gelungen' : '🗺️ Expedition überstanden',
+    description:
+      `${success ? 'Du hast die Expedition erfolgreich abgeschlossen.' : 'Die Expedition war hart, aber du bist mit etwas Beute zurückgekehrt.'}\n\n` +
+      `⚔️ Kampfkraft: ${combatPower} (Wurf ${expeditionRoll})\n` +
+      `🎯 Schwierigkeit: ${difficulty}\n\n` +
+      `-${foodCost} Nahrung\n` +
+      `+${baseExploration} Erkundungspunkte\n` +
+      `+${xp} XP\n` +
+      `+${ore + bonusOre} Erz\n` +
+      `+${fiber + bonusFiber} Fasern\n` +
+      `+${scrap + bonusScrap} Schrott\n` +
+      `${bonusHit ? '\n🔎 Dein Suchgerät hat zusätzliche Beute entdeckt.\n' : '\n'}` +
+      `${result.levelUpText}`,
+    color: success ? 0x1abc9c : 0x95a5a6
+  });
+}
+
 function buildLagerPayload() {
   const { totals, progress: camp } = getCampState();
 
   const campProgressText = camp.isMaxLevel
     ? 'Max-Stufe erreicht'
-    : `${camp.currentInLevel}/${camp.neededForNextLevel} Beitrag bis Stufe ${camp.nextLevel}`;
+    : `${camp.currentInLevel}/${camp.neededForNextLevel} ${camp.progressionLabel} bis Stufe ${camp.nextLevel}`;
 
   return {
     content: '',
@@ -674,18 +950,44 @@ function buildLagerPayload() {
       new EmbedBuilder()
         .setTitle('🏕️ Lagerstatus')
         .setDescription(
-          `**Camp-Stufe:** ${camp.level}\n` +
-          `**Camp-Fortschritt:** ${campProgressText}\n\n` +
-          `**Abenteurer:** ${totals.players}\n` +
-          `**Gesamt-XP:** ${totals.xp}\n\n` +
-          `**🪵 Holz:** ${totals.wood}\n` +
-          `**🍖 Nahrung:** ${totals.food}\n` +
-          `**🪨 Stein:** ${totals.stone}\n` +
-          `**🏗️ Gesamtbeitrag:** ${totals.contribution}\n\n` +
-          `**Freischaltungen**\n` +
-          `Stufe 1: Sammeln, Arbeiten\n` +
-          `Stufe 2: Trainieren\n` +
-          `Stufe 3: Erkunden`
+          `**Camp-Stufe:** ${camp.level}
+` +
+          `**Phase:** ${camp.phaseLabel}
+` +
+          `**Camp-Fortschritt:** ${campProgressText}
+
+` +
+          `**Abenteurer:** ${totals.players}
+` +
+          `**Gesamt-XP:** ${totals.xp}
+
+` +
+          `**🪵 Holz:** ${totals.wood}
+` +
+          `**🍖 Nahrung:** ${totals.food}
+` +
+          `**🪨 Stein:** ${totals.stone}
+` +
+          `**⛏️ Erz:** ${totals.ore || 0}
+` +
+          `**🧵 Fasern:** ${totals.fiber || 0}
+` +
+          `**🪛 Schrott:** ${totals.scrap || 0}
+` +
+          `**🏗️ Gesamtbeitrag:** ${totals.contribution}
+` +
+          `**🧭 Erkundungspunkte:** ${totals.exploration_points || 0}
+
+` +
+          `**Freischaltungen**
+` +
+          `Stufe 1: Sammeln, Arbeiten
+` +
+          `Stufe 2: Trainieren
+` +
+          `Stufe 3: Erkunden
+` +
+          `Stufe 4: Schmiede, Expedition`
         )
         .setColor(0xf1c40f)
     ],
@@ -700,7 +1002,10 @@ module.exports = {
       (
         interaction.customId === 'camp:actions:open' ||
         interaction.customId === 'camp:actions:back' ||
-        interaction.customId === 'camp:actions:menu'
+        interaction.customId === 'camp:actions:menu' ||
+        interaction.customId === 'camp:forge:weapon' ||
+        interaction.customId === 'camp:forge:armor' ||
+        interaction.customId === 'camp:forge:scanner'
       )
     );
   },
@@ -742,6 +1047,37 @@ module.exports = {
 
       await interaction.editReply(buildActionMenu(player)).catch(() => null);
       return true;
+    }
+
+    if (interaction.isButton() && interaction.customId.startsWith('camp:forge:')) {
+      const ok = await safeDeferUpdate(interaction);
+      if (!ok) return false;
+
+      const player = getPlayerByDiscordUserId(interaction.user.id);
+
+      if (!player) {
+        await interaction.editReply({
+          content: 'Du hast noch kein Abenteuer begonnen. Öffne das Menü bitte erneut über die feste Aktionsnachricht.',
+          embeds: [],
+          components: []
+        }).catch(() => null);
+        return true;
+      }
+
+      if (interaction.customId === 'camp:forge:weapon') {
+        await interaction.editReply(await runForgeUpgrade(player, interaction, 'weapon_tier')).catch(() => null);
+        return true;
+      }
+
+      if (interaction.customId === 'camp:forge:armor') {
+        await interaction.editReply(await runForgeUpgrade(player, interaction, 'armor_tier')).catch(() => null);
+        return true;
+      }
+
+      if (interaction.customId === 'camp:forge:scanner') {
+        await interaction.editReply(await runForgeUpgrade(player, interaction, 'scanner_tier')).catch(() => null);
+        return true;
+      }
     }
 
     if (interaction.isStringSelectMenu() && interaction.customId === 'camp:actions:menu') {

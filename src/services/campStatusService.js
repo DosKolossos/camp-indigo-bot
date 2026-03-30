@@ -62,7 +62,7 @@ function getUnlockedFeatures(level) {
   const features = ['Sammeln', 'Arbeiten'];
   if (level >= 2) features.push('Trainieren');
   if (level >= 3) features.push('Erkunden');
-  if (level >= 4) features.push('Expedition');
+  if (level >= 4) features.push('Schmiede', 'Expedition');
   return features;
 }
 

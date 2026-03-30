@@ -40,6 +40,12 @@ db.exec(`
     contribution INTEGER NOT NULL DEFAULT 0,
     exploration_points INTEGER NOT NULL DEFAULT 0,
     food_credit INTEGER NOT NULL DEFAULT 0,
+    ore INTEGER NOT NULL DEFAULT 0,
+    fiber INTEGER NOT NULL DEFAULT 0,
+    scrap INTEGER NOT NULL DEFAULT 0,
+    weapon_tier INTEGER NOT NULL DEFAULT 0,
+    armor_tier INTEGER NOT NULL DEFAULT 0,
+    scanner_tier INTEGER NOT NULL DEFAULT 0,
     guild_role_id TEXT,
     sammeln_cooldown_until TEXT,
     arbeiten_cooldown_until TEXT,
@@ -80,6 +86,12 @@ ensureColumn('players', 'arbeiten_cooldown_until', 'TEXT');
 ensureColumn('players', 'trainieren_cooldown_until', 'TEXT');
 ensureColumn('players', 'busy_until', 'TEXT');
 ensureColumn('players', 'busy_activity', 'TEXT');
+ensureColumn('players', 'ore', 'INTEGER NOT NULL DEFAULT 0');
+ensureColumn('players', 'fiber', 'INTEGER NOT NULL DEFAULT 0');
+ensureColumn('players', 'scrap', 'INTEGER NOT NULL DEFAULT 0');
+ensureColumn('players', 'weapon_tier', 'INTEGER NOT NULL DEFAULT 0');
+ensureColumn('players', 'armor_tier', 'INTEGER NOT NULL DEFAULT 0');
+ensureColumn('players', 'scanner_tier', 'INTEGER NOT NULL DEFAULT 0');
 ensureColumn('player_activity_log', 'exploration_points_delta', 'INTEGER NOT NULL DEFAULT 0');
 
 module.exports = db;
