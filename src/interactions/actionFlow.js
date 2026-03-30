@@ -859,6 +859,84 @@ async function runTrainieren(player, interaction) {
   });
 }
 
+async function runErkunden(player, interaction) {
+  const busy = getBusyStatus(player);
+  if (busy.isBusy) {
+    return buildBusyPayload(player);
+  }
+
+  const camp = getCampState().progress;
+  if (camp.level < ERKUNDEN_UNLOCK_CAMP_LEVEL) {
+    return buildLockedPayload(
+      '🔒 Erkunden noch nicht freigeschaltet',
+      `Erkundungen werden erst ab **Camp-Stufe ${ERKUNDEN_UNLOCK_CAMP_LEVEL}** möglich.\n\nAktuell ist euer Camp auf **Stufe ${camp.level}**.`
+    );
+  }
+
+  const stats = getPlayerStats(player);
+
+  const explorationPoints =
+    randomInt(8, 14) +
+    Math.floor(((stats.instinkt || 0) + (stats.geschick || 0)) / 6);
+
+  const xp =
+    randomInt(4, 7) +
+    Math.floor((stats.tempo || 0) / 6);
+
+  const foodCost = 1;
+
+  // Ab Camp-Stufe 4 kleine Materialchance
+  const campLevel = camp.level;
+  const ore = campLevel >= 4 ? randomInt(0, 1) : 0;
+  const fiber = campLevel >= 4 ? randomInt(0, 1) : 0;
+  const scrap = campLevel >= 4 ? randomInt(0, 1) : 0;
+
+  if ((player.food || 0) < foodCost) {
+    return buildLockedPayload(
+      '🍖 Nicht genug Nahrung',
+      'Für eine Erkundung benötigst du **1 Nahrung**.'
+    );
+  }
+
+  const changes = {
+    food: -foodCost,
+    exploration_points: explorationPoints,
+    xp
+  };
+
+  if (campLevel >= 4) {
+    changes.ore = ore;
+    changes.fiber = fiber;
+    changes.scrap = scrap;
+  }
+
+  const result = await applyProgressWithLevelUpAnnouncement({
+    client: interaction.client,
+    discordUserId: player.discord_user_id,
+    changes
+  });
+
+  logPlayerActivity(player.discord_user_id, 'erkunden', changes);
+
+  await syncCampStatusMessage(interaction.client, player.guild_key).catch(() => null);
+
+  const materialText = campLevel >= 4
+    ? `\n+${ore} Erz\n+${fiber} Fasern\n+${scrap} Schrott\n`
+    : '\n';
+
+  return buildActionResultPayload({
+    title: '🧭 Erkundung abgeschlossen',
+    description:
+      `Du hast die Umgebung des Camps erkundet.\n\n` +
+      `-${foodCost} Nahrung\n` +
+      `+${explorationPoints} Erkundungspunkte\n` +
+      `+${xp} XP` +
+      materialText +
+      `\n**Instinkt** und **Geschick** haben deine Erkundung verbessert.${result.levelUpText}`,
+    color: 0x3498db
+  });
+}
+
 async function runExpedition(player, interaction) {
   const busy = getBusyStatus(player);
   if (busy.isBusy) {
@@ -1114,6 +1192,52 @@ module.exports = {
 
       if (value === 'trainieren') {
         await interaction.editReply(await runTrainieren(player, interaction)).catch(() => null);
+        return true;
+      }
+
+      if (value === 'erkunden') {
+        await interaction.editReply(await runErkunden(player, interaction)).catch(() => null);
+        return true;
+      }
+
+      if (value === 'schmiede') {
+        await interaction.editReply(buildForgePayload(player)).catch(() => null);
+        return true;
+      }
+
+
+      if (value === 'profil') {
+        await interaction.editReply(buildProfilePayload(player)).catch(() => null);
+        return true;
+      }
+
+      if (value === 'sammeln') {
+        await interaction.editReply(await runSammeln(player, interaction)).catch(() => null);
+        return true;
+      }
+
+      if (value === 'arbeiten') {
+        await interaction.editReply(await runArbeiten(player, interaction)).catch(() => null);
+        return true;
+      }
+
+      if (value === 'trainieren') {
+        await interaction.editReply(await runTrainieren(player, interaction)).catch(() => null);
+        return true;
+      }
+
+      if (value === 'erkunden') {
+        await interaction.editReply(await runErkunden(player, interaction)).catch(() => null);
+        return true;
+      }
+
+      if (value === 'schmiede') {
+        await interaction.editReply(buildForgePayload(player)).catch(() => null);
+        return true;
+      }
+
+      if (value === 'expedition') {
+        await interaction.editReply(await runExpedition(player, interaction)).catch(() => null);
         return true;
       }
 
