@@ -9,7 +9,7 @@ Enthalten:
 - ephemerale Gildenwahl
 - Aktionspanel mit Button **Aktionen öffnen**
 - erste Aktionen: **Profil**, **Sammeln**, **Arbeiten**, **Lagerstatus**
-- Cooldowns für **Sammeln** und **Arbeiten**
+- Cooldowns für **Sammeln**, **Arbeiten**, **Trainieren** und **Expeditionen**
 - Spielerprofil in SQLite
 - automatische Gildenrollen-Anlage (`Nimbus`, `Ember`, `Volt`)
 - Willkommensnachricht im Chat
@@ -25,9 +25,11 @@ CHAT_CHANNEL_ID=
 START_CHANNEL_ID=
 ACTION_CHANNEL_ID=
 
-# optional, Standard: 10 und 8
+# optional
 SAMMELN_COOLDOWN_MINUTES=10
 ARBEITEN_COOLDOWN_MINUTES=8
+TRAINIEREN_COOLDOWN_MINUTES=12
+EXPEDITION_COOLDOWN_MINUTES=30
 
 # Admin-Webinterface
 ADMIN_WEB_ENABLED=true

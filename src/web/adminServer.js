@@ -87,7 +87,8 @@ function startAdminServer() {
       contribution: req.body.contribution,
       exploration_points: req.body.exploration_points,
       sammeln_cooldown_until: req.body.sammeln_cooldown_until,
-      arbeiten_cooldown_until: req.body.arbeiten_cooldown_until
+      arbeiten_cooldown_until: req.body.arbeiten_cooldown_until,
+      expedition_cooldown_until: req.body.expedition_cooldown_until
     });
 
     return res.redirect('/admin/player/' + id + '?notice=success&message=' + encodeURIComponent('Spielstand gespeichert.'));
@@ -425,6 +426,7 @@ function renderDashboard(players, totals, notice, message) {
 function renderPlayerRow(player) {
   const sammeln = renderCooldownTag(player.sammeln_cooldown_until, 'Sammeln');
   const arbeiten = renderCooldownTag(player.arbeiten_cooldown_until, 'Arbeiten');
+  const expedition = renderCooldownTag(player.expedition_cooldown_until, 'Expedition');
 
   return `
     <tr>
@@ -437,7 +439,7 @@ function renderPlayerRow(player) {
       <td><strong>Lv ${player.level}</strong><br /><span class="muted">${escapeHtml(getProgressLabel(player))}</span></td>
       <td>🪵 ${player.wood} · 🍖 ${player.food} · 🪨 ${player.stone}</td>
       <td>${player.contribution}</td>
-      <td>${sammeln}<br />${arbeiten}</td>
+      <td>${sammeln}<br />${arbeiten}<br />${expedition}</td>
       <td><span class="muted">${escapeHtml(formatDate(player.updated_at))}</span></td>
       <td>
         <div class="actions">
@@ -462,6 +464,7 @@ function renderPlayerEditor(player) {
 
   const sammelnValue = player.sammeln_cooldown_until ? toDatetimeLocal(player.sammeln_cooldown_until) : '';
   const arbeitenValue = player.arbeiten_cooldown_until ? toDatetimeLocal(player.arbeiten_cooldown_until) : '';
+  const expeditionValue = player.expedition_cooldown_until ? toDatetimeLocal(player.expedition_cooldown_until) : '';
 
   const optionsStarters = starters.map(starter => `
     <option value="${escapeHtml(starter.key)}" ${starter.key === player.pokemon_key ? 'selected' : ''}>${escapeHtml(starter.name)} (${escapeHtml(starter.key)})</option>
@@ -531,6 +534,10 @@ function renderPlayerEditor(player) {
           <div>
             <label>Arbeiten-Cooldown bis</label>
             <input type="datetime-local" name="arbeiten_cooldown_until" value="${escapeHtml(arbeitenValue)}" />
+          </div>
+          <div>
+            <label>Expedition-Cooldown bis</label>
+            <input type="datetime-local" name="expedition_cooldown_until" value="${escapeHtml(expeditionValue)}" />
           </div>
           <div>
             <label>Erkundungspunkte</label>

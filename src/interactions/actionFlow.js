@@ -4,10 +4,7 @@ const {
   ButtonBuilder,
   ButtonStyle,
   EmbedBuilder,
-  MessageFlags,
-  ModalBuilder,
-  TextInputBuilder,
-  TextInputStyle
+  MessageFlags
 } = require('discord.js');
 
 const starters = require('../config/starters');
@@ -32,65 +29,17 @@ const {
   EQUIPMENT_TIER_NAMES,
   CRAFTING_RECIPES
 } = require('../config/crafting');
-const { getItemDefinition } = require('../config/items');
-const {
-  getPlayerInventory,
-  craftMarketItem,
-  useInventoryItem,
-  getCraftableMarketItems,
-  getUsableInventoryItems
-} = require('../services/inventoryService');
-const {
-  getMarketOverview,
-  getListingById,
-  createListing,
-  cancelListing,
-  purchaseListing
-} = require('../services/marketService');
 
 const SAMMELN_COOLDOWN_MS = parseDurationMs(process.env.SAMMELN_COOLDOWN_MINUTES, 10 * 60 * 1000, 60 * 1000);
 const ARBEITEN_COOLDOWN_MS = parseDurationMs(process.env.ARBEITEN_COOLDOWN_MINUTES, 8 * 60 * 1000, 60 * 1000);
 const TRAINIEREN_COOLDOWN_MS = parseDurationMs(process.env.TRAINIEREN_COOLDOWN_MINUTES, 12 * 60 * 1000, 60 * 1000);
+const EXPEDITION_COOLDOWN_MS = parseDurationMs(process.env.EXPEDITION_COOLDOWN_MINUTES, 30 * 60 * 1000, 60 * 1000);
 
 const TRAINIEREN_UNLOCK_CAMP_LEVEL = 2;
 const ERKUNDEN_UNLOCK_CAMP_LEVEL = 3;
 const SCHMIEDE_UNLOCK_CAMP_LEVEL = 4;
 const EXPEDITION_UNLOCK_CAMP_LEVEL = 4;
 const ERKUNDEN_BUSY_MS = 60 * 60 * 1000;
-const MARKET_UNLOCK_CAMP_LEVEL = 5;
-const MAX_MARKET_LISTINGS = 10;
-const RESOURCE_LABELS = {
-  wood: 'Holz',
-  food: 'Nahrung',
-  stone: 'Stein',
-  ore: 'Erz',
-  fiber: 'Fasern',
-  scrap: 'Schrott'
-};
-const RESOURCE_EMOJIS = {
-  wood: '🪵',
-  food: '🍖',
-  stone: '🪨',
-  ore: '⛏️',
-  fiber: '🧵',
-  scrap: '🪛'
-};
-const RESOURCE_ALIASES = {
-  holz: 'wood',
-  wood: 'wood',
-  nahrung: 'food',
-  food: 'food',
-  stein: 'stone',
-  stone: 'stone',
-  erz: 'ore',
-  ore: 'ore',
-  faser: 'fiber',
-  fasern: 'fiber',
-  fiber: 'fiber',
-  schrott: 'scrap',
-  scrap: 'scrap'
-};
-
 
 function parseDurationMs(envValue, fallback, multiplier = 1) {
   const numericValue = Number(envValue);
@@ -124,18 +73,6 @@ async function safeDeferReply(interaction) {
 async function safeDeferUpdate(interaction) {
   try {
     await interaction.deferUpdate();
-    return true;
-  } catch (error) {
-    if (isExpiredInteractionError(error)) {
-      return false;
-    }
-    throw error;
-  }
-}
-
-async function safeShowModal(interaction, modal) {
-  try {
-    await interaction.showModal(modal);
     return true;
   } catch (error) {
     if (isExpiredInteractionError(error)) {
@@ -182,177 +119,6 @@ function buildBackRow() {
   );
 }
 
-
-function buildMarketBackRow() {
-  return new ActionRowBuilder().addComponents(
-    new ButtonBuilder()
-      .setCustomId('camp:market:back')
-      .setLabel('Zurück zum Markt')
-      .setStyle(ButtonStyle.Secondary)
-  );
-}
-
-function truncateText(value, maxLength = 100) {
-  const safeValue = String(value || '');
-  if (safeValue.length <= maxLength) {
-    return safeValue;
-  }
-
-  return `${safeValue.slice(0, Math.max(0, maxLength - 1))}…`;
-}
-
-function formatResourceAmount(key, amount, withEmoji = false) {
-  const prefix = withEmoji ? `${RESOURCE_EMOJIS[key] || '📦'} ` : '';
-  return `${prefix}${amount} ${RESOURCE_LABELS[key] || key}`;
-}
-
-function formatResourceMap(values = {}, withEmoji = false) {
-  return Object.entries(values)
-    .filter(([, amount]) => Number(amount) > 0)
-    .map(([key, amount]) => formatResourceAmount(key, amount, withEmoji))
-    .join(', ');
-}
-
-function parsePriceInput(rawInput) {
-  const raw = String(rawInput || '').trim();
-  if (!raw) {
-    throw new Error('Bitte gib einen Preis an, z. B. wood=12, stone=6, ore=2.');
-  }
-
-  const normalized = {};
-  const parts = raw.split(',').map(part => part.trim()).filter(Boolean);
-  for (const part of parts) {
-    const [rawKey, rawValue] = part.split('=').map(piece => piece?.trim());
-    const key = RESOURCE_ALIASES[String(rawKey || '').toLowerCase()];
-    const value = Number(rawValue);
-
-    if (!key || !Number.isFinite(value) || value < 0 || !Number.isInteger(value)) {
-      throw new Error('Preisformat ungültig. Nutze z. B. wood=12, stone=6, ore=2.');
-    }
-
-    if (value > 0) {
-      normalized[key] = (normalized[key] || 0) + value;
-    }
-  }
-
-  if (Object.keys(normalized).length === 0) {
-    throw new Error('Ein Angebot braucht mindestens einen positiven Preisbestandteil.');
-  }
-
-  return normalized;
-}
-
-function formatInventorySummary(inventory = []) {
-  if (!inventory.length) {
-    return 'Keine handelbaren Kits im Inventar.';
-  }
-
-  return inventory
-    .map(entry => `${entry.item?.emoji || '📦'} ${entry.item?.label || entry.item_key} ×${entry.quantity}`)
-    .join('\n');
-}
-
-function getSellableInventory(player) {
-  return getPlayerInventory(player.id).filter(entry => entry.item);
-}
-
-function buildCraftKitOptions() {
-  return getCraftableMarketItems().map(item => ({
-    label: item.label,
-    description: truncateText(`Kosten: ${formatResourceMap(item.recipe)}`),
-    value: item.key,
-    emoji: item.emoji
-  }));
-}
-
-function buildUsableKitOptions(player) {
-  return getUsableInventoryItems(player.id).map(entry => ({
-    label: `${entry.item?.label || entry.item_key} ×${entry.quantity}`,
-    description: truncateText(`Verbessert ${EQUIPMENT_LABELS[entry.item?.targetField]} auf ${getEquipmentTierName(entry.item?.targetField, entry.item?.targetTier)}`),
-    value: entry.item_key,
-    emoji: entry.item?.emoji || '📦'
-  }));
-}
-
-function buildListingLabel(listing) {
-  return `${listing.item?.emoji || '📦'} ${listing.quantity}x ${listing.item?.shortLabel || listing.item?.label || listing.item_key}`;
-}
-
-function buildListingDescription(listing) {
-  return truncateText(`Preis: ${formatResourceMap(listing.price)} • von ${listing.seller_name || 'Unbekannt'}`);
-}
-
-function buildMarketListingOptions(listings = []) {
-  return listings.map(listing => ({
-    label: truncateText(buildListingLabel(listing), 100),
-    description: buildListingDescription(listing),
-    value: String(listing.id)
-  }));
-}
-
-function buildOwnListingDescription(listing) {
-  return truncateText(`Preis: ${formatResourceMap(listing.price)} • Status: ${listing.status}`);
-}
-
-function buildOwnListingOptions(listings = []) {
-  return listings.map(listing => ({
-    label: truncateText(buildListingLabel(listing), 100),
-    description: buildOwnListingDescription(listing),
-    value: String(listing.id)
-  }));
-}
-
-function buildSellableInventoryOptions(inventory = []) {
-  return inventory.map(entry => ({
-    label: truncateText(`${entry.item?.emoji || '📦'} ${entry.item?.label || entry.item_key}`),
-    description: truncateText(`Im Inventar: ${entry.quantity}`),
-    value: entry.item_key
-  }));
-}
-
-function buildCreateListingModal(itemKey, itemLabel) {
-  return new ModalBuilder()
-    .setCustomId(`camp:market:create:${itemKey}`)
-    .setTitle('Angebot erstellen')
-    .addComponents(
-      new ActionRowBuilder().addComponents(
-        new TextInputBuilder()
-          .setCustomId('quantity')
-          .setLabel(`${itemLabel} - Menge`)
-          .setStyle(TextInputStyle.Short)
-          .setPlaceholder('z. B. 1')
-          .setRequired(true)
-          .setMaxLength(4)
-      ),
-      new ActionRowBuilder().addComponents(
-        new TextInputBuilder()
-          .setCustomId('price')
-          .setLabel('Preis (Format: wood=12, stone=6, ore=2)')
-          .setStyle(TextInputStyle.Paragraph)
-          .setPlaceholder('wood=12, stone=6, ore=2')
-          .setRequired(true)
-          .setMaxLength(200)
-      )
-    );
-}
-
-function getForgeInventoryText(player) {
-  return formatInventorySummary(getPlayerInventory(player.id));
-}
-
-function buildListingDetailText(listing) {
-  return (
-    `**Item:** ${listing.item?.emoji || '📦'} ${listing.item?.label || listing.item_key}
-` +
-    `**Menge:** ${listing.quantity}
-` +
-    `**Preis gesamt:** ${formatResourceMap(listing.price, true)}
-` +
-    `**Verkäufer:** ${listing.seller_name || 'Unbekannt'}
-` +
-    `**Status:** ${listing.status}`
-  );
-}
 function clampMin(value, minValue) {
   return Math.max(minValue, value);
 }
@@ -443,19 +209,23 @@ function getActionStatus(player) {
   const sammelnCooldownMs = getTempoAdjustedCooldownMs(SAMMELN_COOLDOWN_MS, stats.tempo);
   const arbeitenCooldownMs = getTempoAdjustedCooldownMs(ARBEITEN_COOLDOWN_MS, stats.tempo);
   const trainierenCooldownMs = getTempoAdjustedCooldownMs(TRAINIEREN_COOLDOWN_MS, stats.tempo);
+  const expeditionCooldownMs = getTempoAdjustedCooldownMs(EXPEDITION_COOLDOWN_MS, stats.tempo);
 
   const sammelnRemaining = getCooldownRemainingMs(player, 'sammeln_cooldown_until');
   const arbeitenRemaining = getCooldownRemainingMs(player, 'arbeiten_cooldown_until');
   const trainierenRemaining = getCooldownRemainingMs(player, 'trainieren_cooldown_until');
+  const expeditionRemaining = getCooldownRemainingMs(player, 'expedition_cooldown_until');
 
   return {
     stats,
     sammelnCooldownMs,
     arbeitenCooldownMs,
     trainierenCooldownMs,
+    expeditionCooldownMs,
     sammelnRemaining,
     arbeitenRemaining,
     trainierenRemaining,
+    expeditionRemaining,
     sammelnLabel: sammelnRemaining > 0
       ? `⏳ Sammeln in ${formatRemaining(sammelnRemaining)}`
       : `✅ Sammeln ist bereit (${formatRemaining(sammelnCooldownMs)} Cooldown)`,
@@ -464,7 +234,10 @@ function getActionStatus(player) {
       : `✅ Arbeiten ist bereit (${formatRemaining(arbeitenCooldownMs)} Cooldown)`,
     trainierenLabel: trainierenRemaining > 0
       ? `⏳ Trainieren in ${formatRemaining(trainierenRemaining)}`
-      : `✅ Trainieren ist bereit (${formatRemaining(trainierenCooldownMs)} Cooldown)`
+      : `✅ Trainieren ist bereit (${formatRemaining(trainierenCooldownMs)} Cooldown)`,
+    expeditionLabel: expeditionRemaining > 0
+      ? `⏳ Expedition in ${formatRemaining(expeditionRemaining)}`
+      : `✅ Expedition ist bereit (${formatRemaining(expeditionCooldownMs)} Cooldown)`
   };
 }
 
@@ -493,10 +266,6 @@ function getUnlockedActionKeys(campLevel) {
     keys.push('schmiede', 'expedition');
   }
 
-  if (campLevel >= MARKET_UNLOCK_CAMP_LEVEL) {
-    keys.push('markt');
-  }
-
   return keys;
 }
 
@@ -513,14 +282,10 @@ function getNextUnlockHint(campLevel) {
     return `🔒 Nächste Freischaltung: **Schmiede & Expedition** ab Camp-Stufe ${SCHMIEDE_UNLOCK_CAMP_LEVEL}`;
   }
 
-  if (campLevel < MARKET_UNLOCK_CAMP_LEVEL) {
-    return `🔒 Nächste Freischaltung: **Markt** ab Camp-Stufe ${MARKET_UNLOCK_CAMP_LEVEL}`;
-  }
-
   return '✨ Alle aktuell eingebauten Camp-Aktionen sind freigeschaltet.';
 }
 
-function buildActionOptions({ busy, cooldowns, trainingUnlocked, erkundenUnlocked, forgeUnlocked, expeditionUnlocked, marketUnlocked }) {
+function buildActionOptions({ busy, cooldowns, trainingUnlocked, erkundenUnlocked, forgeUnlocked, expeditionUnlocked }) {
   const options = [
     {
       label: 'Profil ansehen',
@@ -588,18 +353,11 @@ function buildActionOptions({ busy, cooldowns, trainingUnlocked, erkundenUnlocke
       label: 'Expedition',
       description: busy.isBusy
         ? `Gesperrt: Du bist auf ${getBusyActivityLabel(busy.activityKey)}`
-        : 'Bestehe gefährliche Ausflüge für bessere Beute',
+        : cooldowns.expeditionRemaining > 0
+          ? `Wieder bereit in ${formatRemaining(cooldowns.expeditionRemaining)}`
+          : 'Bestehe gefährliche Ausflüge für bessere Beute',
       value: 'expedition',
       emoji: '🗺️'
-    });
-  }
-
-  if (marketUnlocked) {
-    options.push({
-      label: 'Markt',
-      description: 'Handle Kits gegen Rohstoffe mit anderen Spielern',
-      value: 'markt',
-      emoji: '🛒'
     });
   }
 
@@ -633,19 +391,6 @@ function buildBusyPayload(player) {
     '🧭 Du bist gerade unterwegs',
     `${busy.label}\n\nWährend du unterwegs bist, kannst du im Camp keine Dorfaktion starten.`
   );
-}
-
-function buildMarketResultPayload({ title, description, color = 0x3498db }) {
-  return {
-    content: '',
-    embeds: [
-      new EmbedBuilder()
-        .setTitle(title)
-        .setDescription(description)
-        .setColor(color)
-    ],
-    components: [buildMarketBackRow()]
-  };
 }
 
 function buildActionResultPayload({ title, description, color = 0x2ecc71 }) {
@@ -691,19 +436,29 @@ function getPlayerLootBonus(player) {
 }
 
 function formatRecipeCost(costs = {}) {
-  return formatResourceMap(costs);
+  const labels = {
+    wood: 'Holz',
+    stone: 'Stein',
+    food: 'Nahrung',
+    ore: 'Erz',
+    fiber: 'Fasern',
+    scrap: 'Schrott'
+  };
+
+  return Object.entries(costs)
+    .filter(([, amount]) => Number(amount) > 0)
+    .map(([key, amount]) => `${amount} ${labels[key] || key}`)
+    .join(', ');
 }
 
 function canAffordCosts(player, costs = {}) {
   return Object.entries(costs).every(([key, amount]) => (Number(player[key]) || 0) >= (Number(amount) || 0));
 }
 
-function buildForgeComponents(player) {
+function buildForgeButtons(player) {
   const weaponTier = Number(player.weapon_tier) || 0;
   const armorTier = Number(player.armor_tier) || 0;
   const scannerTier = Number(player.scanner_tier) || 0;
-  const craftOptions = buildCraftKitOptions();
-  const usableOptions = buildUsableKitOptions(player);
 
   return [
     new ActionRowBuilder().addComponents(
@@ -724,28 +479,11 @@ function buildForgeComponents(player) {
         .setDisabled(scannerTier >= EQUIPMENT_MAX_TIER)
     ),
     new ActionRowBuilder().addComponents(
-      new StringSelectMenuBuilder()
-        .setCustomId('camp:forge:craftkit')
-        .setPlaceholder('Handelbares Kit herstellen')
-        .setDisabled(craftOptions.length === 0)
-        .addOptions(craftOptions.length ? craftOptions : [{
-          label: 'Keine Kits verfügbar',
-          description: 'Aktuell sind keine Markt-Kits definiert.',
-          value: 'none'
-        }])
-    ),
-    new ActionRowBuilder().addComponents(
-      new StringSelectMenuBuilder()
-        .setCustomId('camp:forge:usekit')
-        .setPlaceholder(usableOptions.length ? 'Kit aus Inventar anwenden' : 'Keine nutzbaren Kits im Inventar')
-        .setDisabled(usableOptions.length === 0)
-        .addOptions(usableOptions.length ? usableOptions : [{
-          label: 'Keine nutzbaren Kits',
-          description: 'Sammle oder kaufe passende Kits auf dem Markt.',
-          value: 'none'
-        }])
-    ),
-    buildBackRow()
+      new ButtonBuilder()
+        .setCustomId('camp:actions:back')
+        .setLabel('Zurück zum Aktionsmenü')
+        .setStyle(ButtonStyle.Secondary)
+    )
   ];
 }
 
@@ -761,52 +499,26 @@ function buildForgePayload(player) {
   const embed = new EmbedBuilder()
     .setTitle('⚒️ Werkbank & Schmiede')
     .setDescription(
-      `**Aktuelle Ausrüstung**
-` +
-      `Waffe: ${getEquipmentTierName('weapon_tier', weaponTier)}
-` +
-      `Rüstung: ${getEquipmentTierName('armor_tier', armorTier)}
-` +
-      `Suchgerät: ${getEquipmentTierName('scanner_tier', scannerTier)}
-
-` +
-      `**Materialien**
-` +
-      `🪵 Holz: ${player.wood || 0}
-` +
-      `🍖 Nahrung: ${player.food || 0}
-` +
-      `🪨 Stein: ${player.stone || 0}
-` +
-      `⛏️ Erz: ${player.ore || 0}
-` +
-      `🧵 Fasern: ${player.fiber || 0}
-` +
-      `🪛 Schrott: ${player.scrap || 0}
-
-` +
-      `**Direkte Ausbauten**
-` +
-      `${weaponTier >= EQUIPMENT_MAX_TIER ? 'Waffe: Max-Stufe' : `Waffe T${nextWeaponTier}: ${formatRecipeCost(CRAFTING_RECIPES.weapon_tier[nextWeaponTier])}`}
-` +
-      `${armorTier >= EQUIPMENT_MAX_TIER ? 'Rüstung: Max-Stufe' : `Rüstung T${nextArmorTier}: ${formatRecipeCost(CRAFTING_RECIPES.armor_tier[nextArmorTier])}`}
-` +
-      `${scannerTier >= EQUIPMENT_MAX_TIER ? 'Suchgerät: Max-Stufe' : `Suchgerät T${nextScannerTier}: ${formatRecipeCost(CRAFTING_RECIPES.scanner_tier[nextScannerTier])}`}
-
-` +
-      `**Handelskits im Inventar**
-` +
-      `${getForgeInventoryText(player)}
-
-` +
-      `Du kannst weiterhin direkt aufrüsten **oder** handelbare Kits herstellen und auf dem Markt anbieten.`
+      `**Aktuelle Ausrüstung**\n` +
+      `Waffe: ${getEquipmentTierName('weapon_tier', weaponTier)}\n` +
+      `Rüstung: ${getEquipmentTierName('armor_tier', armorTier)}\n` +
+      `Suchgerät: ${getEquipmentTierName('scanner_tier', scannerTier)}\n\n` +
+      `**Materialien**\n` +
+      `⛏️ Erz: ${player.ore || 0}\n` +
+      `🧵 Fasern: ${player.fiber || 0}\n` +
+      `🪛 Schrott: ${player.scrap || 0}\n\n` +
+      `**Nächste Rezepte**\n` +
+      `${weaponTier >= EQUIPMENT_MAX_TIER ? 'Waffe: Max-Stufe' : `Waffe T${nextWeaponTier}: ${formatRecipeCost(CRAFTING_RECIPES.weapon_tier[nextWeaponTier])}`}\n` +
+      `${armorTier >= EQUIPMENT_MAX_TIER ? 'Rüstung: Max-Stufe' : `Rüstung T${nextArmorTier}: ${formatRecipeCost(CRAFTING_RECIPES.armor_tier[nextArmorTier])}`}\n` +
+      `${scannerTier >= EQUIPMENT_MAX_TIER ? 'Suchgerät: Max-Stufe' : `Suchgerät T${nextScannerTier}: ${formatRecipeCost(CRAFTING_RECIPES.scanner_tier[nextScannerTier])}`}\n\n` +
+      `Waffen erhöhen deine **Kampfkraft**, Rüstungen geben **Sicherheit**, Suchgeräte verbessern deine **Beute** auf Expeditionen.`
     )
     .setColor(0xf39c12);
 
   return {
     content: '',
     embeds: [embed],
-    components: buildForgeComponents(player)
+    components: buildForgeButtons(player)
   };
 }
 
@@ -872,236 +584,7 @@ async function runForgeUpgrade(player, interaction, fieldName) {
         )
         .setColor(0xf39c12)
     ],
-    components: buildForgeComponents(refreshedPlayer)
-  };
-}
-
-
-async function runCraftKit(player, interaction, itemKey) {
-  const busy = getBusyStatus(player);
-  if (busy.isBusy) {
-    return buildBusyPayload(player);
-  }
-
-  const camp = getCampState().progress;
-  if (camp.level < SCHMIEDE_UNLOCK_CAMP_LEVEL) {
-    return buildLockedPayload(
-      '🔒 Schmiede noch nicht freigeschaltet',
-      `Die Werkbank wird erst ab **Camp-Stufe ${SCHMIEDE_UNLOCK_CAMP_LEVEL}** ausgebaut.`
-    );
-  }
-
-  const item = getItemDefinition(itemKey);
-  if (!item) {
-    return buildLockedPayload('⚠️ Unbekanntes Kit', 'Dieses Kit ist aktuell nicht definiert.');
-  }
-
-  try {
-    craftMarketItem({ playerId: player.id, itemKey });
-  } catch (error) {
-    return buildLockedPayload('📦 Herstellung fehlgeschlagen', String(error.message || error));
-  }
-
-  await syncCampStatusMessage(interaction.client, player.guild_key).catch(() => null);
-  const refreshedPlayer = getPlayerByDiscordUserId(player.discord_user_id);
-
-  return {
-    content: '',
-    embeds: [
-      new EmbedBuilder()
-        .setTitle('📦 Handelskits hergestellt')
-        .setDescription(
-          `Du hast **${item.label}** hergestellt.
-
-` +
-          `Kosten: ${formatRecipeCost(item.recipe)}
-` +
-          `Das Kit liegt jetzt in deinem Inventar und kann auf dem Markt verkauft oder direkt genutzt werden.`
-        )
-        .setColor(0x16a085)
-    ],
-    components: buildForgeComponents(refreshedPlayer)
-  };
-}
-
-async function runUseKit(player, itemKey) {
-  const busy = getBusyStatus(player);
-  if (busy.isBusy) {
-    return buildBusyPayload(player);
-  }
-
-  const item = getItemDefinition(itemKey);
-  if (!item) {
-    return buildLockedPayload('⚠️ Unbekanntes Kit', 'Dieses Kit ist aktuell nicht definiert.');
-  }
-
-  try {
-    useInventoryItem({ playerId: player.id, itemKey });
-  } catch (error) {
-    return buildLockedPayload('📦 Kit konnte nicht genutzt werden', String(error.message || error));
-  }
-
-  const refreshedPlayer = getPlayerByDiscordUserId(player.discord_user_id);
-
-  return {
-    content: '',
-    embeds: [
-      new EmbedBuilder()
-        .setTitle('✨ Kit eingesetzt')
-        .setDescription(
-          `Du hast **${item.label}** verwendet.
-
-` +
-          `${EQUIPMENT_LABELS[item.targetField]} ist jetzt auf **${getEquipmentTierName(item.targetField, item.targetTier)}**.`
-        )
-        .setColor(0x1abc9c)
-    ],
-    components: buildForgeComponents(refreshedPlayer)
-  };
-}
-
-function buildMarketPayload(player) {
-  const camp = getCampState().progress;
-  if (camp.level < MARKET_UNLOCK_CAMP_LEVEL) {
-    return buildLockedPayload(
-      '🔒 Markt noch nicht freigeschaltet',
-      `Der Markt öffnet erst ab **Camp-Stufe ${MARKET_UNLOCK_CAMP_LEVEL}**.
-
-Aktuell ist euer Camp auf **Stufe ${camp.level}**.`
-    );
-  }
-
-  const overview = getMarketOverview(player.id);
-  const activeListings = overview.activeListings.slice(0, MAX_MARKET_LISTINGS);
-  const ownListings = overview.ownListings.slice(0, MAX_MARKET_LISTINGS);
-  const sellableInventory = getSellableInventory(player);
-
-  const embed = new EmbedBuilder()
-    .setTitle('🛒 Markt')
-    .setDescription(
-      `**Deine Ressourcen**
-` +
-      `${formatResourceAmount('wood', player.wood || 0, true)}
-` +
-      `${formatResourceAmount('food', player.food || 0, true)}
-` +
-      `${formatResourceAmount('stone', player.stone || 0, true)}
-` +
-      `${formatResourceAmount('ore', player.ore || 0, true)}
-` +
-      `${formatResourceAmount('fiber', player.fiber || 0, true)}
-` +
-      `${formatResourceAmount('scrap', player.scrap || 0, true)}
-
-` +
-      `**Dein Marktinventar**
-${formatInventorySummary(sellableInventory)}
-
-` +
-      `**Aktive Angebote**: ${activeListings.length}
-` +
-      `**Deine Angebote**: ${ownListings.length}
-
-` +
-      `Für neue Angebote wählst du unten zuerst ein Kit aus deinem Inventar. Preisformat im Dialog: **wood=12, stone=6, ore=2**`
-    )
-    .setColor(0x3498db);
-
-  return {
-    content: '',
-    embeds: [embed],
-    components: [
-      new ActionRowBuilder().addComponents(
-        new StringSelectMenuBuilder()
-          .setCustomId('camp:market:listings')
-          .setPlaceholder(activeListings.length ? 'Angebot ansehen oder kaufen' : 'Keine aktiven Angebote gefunden')
-          .setDisabled(activeListings.length === 0)
-          .addOptions(activeListings.length ? buildMarketListingOptions(activeListings) : [{
-            label: 'Keine Angebote',
-            description: 'Im Moment ist kein Angebot aktiv.',
-            value: 'none'
-          }])
-      ),
-      new ActionRowBuilder().addComponents(
-        new StringSelectMenuBuilder()
-          .setCustomId('camp:market:sellitem')
-          .setPlaceholder(sellableInventory.length ? 'Eigenes Kit zum Verkauf auswählen' : 'Kein verkaufbares Kit im Inventar')
-          .setDisabled(sellableInventory.length === 0)
-          .addOptions(sellableInventory.length ? buildSellableInventoryOptions(sellableInventory) : [{
-            label: 'Nichts im Inventar',
-            description: 'Stelle erst Kits in der Schmiede her.',
-            value: 'none'
-          }])
-      ),
-      new ActionRowBuilder().addComponents(
-        new StringSelectMenuBuilder()
-          .setCustomId('camp:market:mylistings')
-          .setPlaceholder(ownListings.length ? 'Eigenes Angebot verwalten' : 'Du hast keine aktiven Angebote')
-          .setDisabled(ownListings.length === 0)
-          .addOptions(ownListings.length ? buildOwnListingOptions(ownListings) : [{
-            label: 'Keine eigenen Angebote',
-            description: 'Stelle ein Kit ein, um es hier zu verwalten.',
-            value: 'none'
-          }])
-      ),
-      buildBackRow()
-    ]
-  };
-}
-
-function buildMarketListingPayload(player, listing) {
-  const isOwnListing = Number(listing.seller_player_id) === Number(player.id);
-
-  return {
-    content: '',
-    embeds: [
-      new EmbedBuilder()
-        .setTitle('🧾 Angebotsdetails')
-        .setDescription(
-          `${buildListingDetailText(listing)}
-
-` +
-          `${isOwnListing ? 'Dies ist dein eigenes Angebot.' : 'Wenn du genug Ressourcen hast, kannst du dieses Angebot sofort kaufen.'}`
-        )
-        .setColor(0x2980b9)
-    ],
-    components: [
-      new ActionRowBuilder().addComponents(
-        new ButtonBuilder()
-          .setCustomId(`camp:market:buy:${listing.id}`)
-          .setLabel(isOwnListing ? 'Eigenes Angebot' : 'Jetzt kaufen')
-          .setStyle(ButtonStyle.Success)
-          .setDisabled(isOwnListing || listing.status !== 'active')
-      ),
-      buildMarketBackRow()
-    ]
-  };
-}
-
-function buildOwnListingPayload(listing) {
-  return {
-    content: '',
-    embeds: [
-      new EmbedBuilder()
-        .setTitle('📦 Dein Angebot')
-        .setDescription(
-          `${buildListingDetailText(listing)}
-
-` +
-          `Du kannst dieses Angebot zurückziehen. Das Kit landet dann wieder in deinem Inventar.`
-        )
-        .setColor(0x8e44ad)
-    ],
-    components: [
-      new ActionRowBuilder().addComponents(
-        new ButtonBuilder()
-          .setCustomId(`camp:market:cancel:${listing.id}`)
-          .setLabel('Angebot zurückziehen')
-          .setStyle(ButtonStyle.Danger)
-          .setDisabled(listing.status !== 'active')
-      ),
-      buildMarketBackRow()
-    ]
+    components: buildForgeButtons(refreshedPlayer)
   };
 }
 
@@ -1115,7 +598,6 @@ function buildActionMenu(player) {
   const erkundenUnlocked = camp.level >= ERKUNDEN_UNLOCK_CAMP_LEVEL;
   const forgeUnlocked = camp.level >= SCHMIEDE_UNLOCK_CAMP_LEVEL;
   const expeditionUnlocked = camp.level >= EXPEDITION_UNLOCK_CAMP_LEVEL;
-  const marketUnlocked = camp.level >= MARKET_UNLOCK_CAMP_LEVEL;
 
   const nextUnlockHint = getNextUnlockHint(camp.level);
 
@@ -1130,6 +612,7 @@ function buildActionMenu(player) {
   }
 
   if (forgeUnlocked) {
+    statusLines.push(cooldowns.expeditionLabel);
     statusLines.push(`⚔️ Kampfkraft: ${getPlayerCombatPower(player)} | 🔎 Beutebonus: +${getPlayerLootBonus(player)}%`);
   }
 
@@ -1139,8 +622,7 @@ function buildActionMenu(player) {
     trainingUnlocked,
     erkundenUnlocked,
     forgeUnlocked,
-    expeditionUnlocked,
-    marketUnlocked
+    expeditionUnlocked
   });
 
   const embed = new EmbedBuilder()
@@ -1183,6 +665,7 @@ function buildProfilePayload(player) {
   const guild = getGuild(player.guild_key);
   const cooldowns = getActionStatus(player);
   const busy = getBusyStatus(player);
+  const camp = getCampState().progress;
   const stats = calculateScaledStats(player.pokemon_key, player.level);
   const maxHp = getDisplayedMaxHp(stats);
   const xpProgress = getXpProgress(player.xp);
@@ -1221,7 +704,8 @@ function buildProfilePayload(player) {
       `${busy.label}\n` +
       `${cooldowns.sammelnLabel}\n` +
       `${cooldowns.arbeitenLabel}\n` +
-      `${cooldowns.trainierenLabel}`
+      `${cooldowns.trainierenLabel}` +
+      `${camp.level >= EXPEDITION_UNLOCK_CAMP_LEVEL ? `\n${cooldowns.expeditionLabel}` : ""}`
     )
     .setColor(guild?.color ?? 0x2ecc71);
 
@@ -1477,6 +961,12 @@ async function runExpedition(player, interaction) {
     );
   }
 
+  const cooldowns = getActionStatus(player);
+  const remainingMs = getCooldownRemainingMs(player, 'expedition_cooldown_until');
+  if (remainingMs > 0) {
+    return buildCooldownPayload('Expedition', remainingMs);
+  }
+
   const foodCost = 2;
   if ((player.food || 0) < foodCost) {
     return buildLockedPayload(
@@ -1521,6 +1011,9 @@ async function runExpedition(player, interaction) {
     xp
   });
 
+  const cooldownUntil = new Date(Date.now() + cooldowns.expeditionCooldownMs).toISOString();
+  setActionCooldown(player.discord_user_id, 'expedition', cooldownUntil);
+
   await syncCampStatusMessage(interaction.client, player.guild_key).catch(() => null);
 
   return buildActionResultPayload({
@@ -1536,6 +1029,7 @@ async function runExpedition(player, interaction) {
       `+${fiber + bonusFiber} Fasern\n` +
       `+${scrap + bonusScrap} Schrott\n` +
       `${bonusHit ? '\n🔎 Dein Suchgerät hat zusätzliche Beute entdeckt.\n' : '\n'}` +
+      `Nächste Expedition in **${formatRemaining(cooldowns.expeditionCooldownMs)}**.\n` +
       `${result.levelUpText}`,
     color: success ? 0x1abc9c : 0x95a5a6
   });
@@ -1591,9 +1085,7 @@ function buildLagerPayload() {
 ` +
           `Stufe 3: Erkunden
 ` +
-          `Stufe 4: Schmiede, Expedition
-` +
-          `Stufe 5: Markt`
+          `Stufe 4: Schmiede, Expedition`
         )
         .setColor(0xf1c40f)
     ],
@@ -1603,41 +1095,26 @@ function buildLagerPayload() {
 
 module.exports = {
   canHandleInteraction(interaction) {
-    const customId = interaction.customId || '';
-
     return Boolean(
-      customId && (
-        customId === 'camp:actions:open' ||
-        customId === 'camp:actions:back' ||
-        customId === 'camp:actions:menu' ||
-        customId === 'camp:market:back' ||
-        customId === 'camp:market:listings' ||
-        customId === 'camp:market:sellitem' ||
-        customId === 'camp:market:mylistings' ||
-        customId.startsWith('camp:market:buy:') ||
-        customId.startsWith('camp:market:cancel:') ||
-        customId.startsWith('camp:market:create:') ||
-        customId === 'camp:forge:weapon' ||
-        customId === 'camp:forge:armor' ||
-        customId === 'camp:forge:scanner' ||
-        customId === 'camp:forge:craftkit' ||
-        customId === 'camp:forge:usekit'
+      interaction.customId &&
+      (
+        interaction.customId === 'camp:actions:open' ||
+        interaction.customId === 'camp:actions:back' ||
+        interaction.customId === 'camp:actions:menu' ||
+        interaction.customId === 'camp:forge:weapon' ||
+        interaction.customId === 'camp:forge:armor' ||
+        interaction.customId === 'camp:forge:scanner'
       )
     );
   },
 
   async handleInteraction(interaction) {
-    const getMissingPlayerPayload = () => ({
-      content: 'Du hast noch kein Abenteuer begonnen. Öffne das Menü bitte erneut über die feste Aktionsnachricht.',
-      embeds: [],
-      components: []
-    });
-
     if (interaction.isButton() && interaction.customId === 'camp:actions:open') {
       const ok = await safeDeferReply(interaction);
       if (!ok) return false;
 
       const player = getPlayerByDiscordUserId(interaction.user.id);
+
       if (!player) {
         await interaction.editReply({
           content: 'Du hast noch kein Abenteuer begonnen. Nutze zuerst die Startnachricht.',
@@ -1656,109 +1133,17 @@ module.exports = {
       if (!ok) return false;
 
       const player = getPlayerByDiscordUserId(interaction.user.id);
+
       if (!player) {
-        await interaction.editReply(getMissingPlayerPayload()).catch(() => null);
+        await interaction.editReply({
+          content: 'Du hast noch kein Abenteuer begonnen. Öffne das Menü bitte erneut über die feste Aktionsnachricht.',
+          embeds: [],
+          components: []
+        }).catch(() => null);
         return true;
       }
 
       await interaction.editReply(buildActionMenu(player)).catch(() => null);
-      return true;
-    }
-
-    if (interaction.isButton() && interaction.customId === 'camp:market:back') {
-      const ok = await safeDeferUpdate(interaction);
-      if (!ok) return false;
-
-      const player = getPlayerByDiscordUserId(interaction.user.id);
-      if (!player) {
-        await interaction.editReply(getMissingPlayerPayload()).catch(() => null);
-        return true;
-      }
-
-      await interaction.editReply(buildMarketPayload(player)).catch(() => null);
-      return true;
-    }
-
-    if (interaction.isButton() && interaction.customId.startsWith('camp:market:buy:')) {
-      const ok = await safeDeferUpdate(interaction);
-      if (!ok) return false;
-
-      const player = getPlayerByDiscordUserId(interaction.user.id);
-      if (!player) {
-        await interaction.editReply(getMissingPlayerPayload()).catch(() => null);
-        return true;
-      }
-
-      const listingId = Number(interaction.customId.split(':').pop());
-      try {
-        const listing = purchaseListing({ listingId, buyerPlayerId: player.id });
-        const refreshedPlayer = getPlayerByDiscordUserId(player.discord_user_id);
-        await interaction.editReply({
-          content: '',
-          embeds: [
-            new EmbedBuilder()
-              .setTitle('✅ Kauf abgeschlossen')
-              .setDescription(
-                `Du hast **${listing.quantity}x ${listing.item?.label || listing.item_key}** gekauft.
-
-` +
-                `Gezahlt: ${formatResourceMap(listing.price, true)}
-
-` +
-                `Das Kit liegt jetzt in deinem Inventar.`
-              )
-              .setColor(0x27ae60)
-          ],
-          components: [buildMarketBackRow(), buildBackRow()]
-        }).catch(() => null);
-        await syncCampStatusMessage(interaction.client, refreshedPlayer.guild_key).catch(() => null);
-      } catch (error) {
-        await interaction.editReply(buildMarketResultPayload({
-          title: '❌ Kauf fehlgeschlagen',
-          description: String(error.message || error),
-          color: 0xe74c3c
-        })).catch(() => null);
-      }
-
-      return true;
-    }
-
-    if (interaction.isButton() && interaction.customId.startsWith('camp:market:cancel:')) {
-      const ok = await safeDeferUpdate(interaction);
-      if (!ok) return false;
-
-      const player = getPlayerByDiscordUserId(interaction.user.id);
-      if (!player) {
-        await interaction.editReply(getMissingPlayerPayload()).catch(() => null);
-        return true;
-      }
-
-      const listingId = Number(interaction.customId.split(':').pop());
-      try {
-        const listing = cancelListing({ listingId, sellerPlayerId: player.id });
-        await interaction.editReply({
-          content: '',
-          embeds: [
-            new EmbedBuilder()
-              .setTitle('↩️ Angebot zurückgezogen')
-              .setDescription(
-                `Dein Angebot für **${listing.quantity}x ${listing.item?.label || listing.item_key}** wurde entfernt.
-
-` +
-                `Das Kit liegt wieder in deinem Inventar.`
-              )
-              .setColor(0xf39c12)
-          ],
-          components: [buildMarketBackRow(), buildBackRow()]
-        }).catch(() => null);
-      } catch (error) {
-        await interaction.editReply(buildMarketResultPayload({
-          title: '❌ Rückzug fehlgeschlagen',
-          description: String(error.message || error),
-          color: 0xe74c3c
-        })).catch(() => null);
-      }
-
       return true;
     }
 
@@ -1767,8 +1152,13 @@ module.exports = {
       if (!ok) return false;
 
       const player = getPlayerByDiscordUserId(interaction.user.id);
+
       if (!player) {
-        await interaction.editReply(getMissingPlayerPayload()).catch(() => null);
+        await interaction.editReply({
+          content: 'Du hast noch kein Abenteuer begonnen. Öffne das Menü bitte erneut über die feste Aktionsnachricht.',
+          embeds: [],
+          components: []
+        }).catch(() => null);
         return true;
       }
 
@@ -1788,145 +1178,53 @@ module.exports = {
       }
     }
 
-    if (interaction.isStringSelectMenu() && interaction.customId === 'camp:market:sellitem') {
-      const player = getPlayerByDiscordUserId(interaction.user.id);
-      if (!player) {
-        await interaction.reply({ ...getMissingPlayerPayload(), flags: MessageFlags.Ephemeral }).catch(() => null);
-        return true;
-      }
-
-      const itemKey = interaction.values[0];
-      if (!itemKey || itemKey === 'none') {
-        const ok = await safeDeferUpdate(interaction);
-        if (!ok) return false;
-        await interaction.editReply(buildMarketPayload(player)).catch(() => null);
-        return true;
-      }
-
-      const item = getItemDefinition(itemKey);
-      if (!item) {
-        await interaction.reply({
-          content: 'Dieses Item ist nicht definiert.',
-          flags: MessageFlags.Ephemeral
-        }).catch(() => null);
-        return true;
-      }
-
-      const ok = await safeShowModal(interaction, buildCreateListingModal(itemKey, item.label));
-      return ok;
-    }
-
-    if (interaction.isStringSelectMenu() && interaction.customId === 'camp:forge:craftkit') {
-      const ok = await safeDeferUpdate(interaction);
-      if (!ok) return false;
-
-      const player = getPlayerByDiscordUserId(interaction.user.id);
-      if (!player) {
-        await interaction.editReply(getMissingPlayerPayload()).catch(() => null);
-        return true;
-      }
-
-      const itemKey = interaction.values[0];
-      if (!itemKey || itemKey === 'none') {
-        await interaction.editReply(buildForgePayload(player)).catch(() => null);
-        return true;
-      }
-
-      await interaction.editReply(await runCraftKit(player, interaction, itemKey)).catch(() => null);
-      return true;
-    }
-
-    if (interaction.isStringSelectMenu() && interaction.customId === 'camp:forge:usekit') {
-      const ok = await safeDeferUpdate(interaction);
-      if (!ok) return false;
-
-      const player = getPlayerByDiscordUserId(interaction.user.id);
-      if (!player) {
-        await interaction.editReply(getMissingPlayerPayload()).catch(() => null);
-        return true;
-      }
-
-      const itemKey = interaction.values[0];
-      if (!itemKey || itemKey === 'none') {
-        await interaction.editReply(buildForgePayload(player)).catch(() => null);
-        return true;
-      }
-
-      await interaction.editReply(await runUseKit(player, itemKey)).catch(() => null);
-      return true;
-    }
-
-    if (interaction.isStringSelectMenu() && interaction.customId === 'camp:market:listings') {
-      const ok = await safeDeferUpdate(interaction);
-      if (!ok) return false;
-
-      const player = getPlayerByDiscordUserId(interaction.user.id);
-      if (!player) {
-        await interaction.editReply(getMissingPlayerPayload()).catch(() => null);
-        return true;
-      }
-
-      const listingId = Number(interaction.values[0]);
-      if (!listingId) {
-        await interaction.editReply(buildMarketPayload(player)).catch(() => null);
-        return true;
-      }
-
-      const listing = getListingById(listingId);
-      if (!listing) {
-        await interaction.editReply(buildMarketResultPayload({
-          title: '❌ Angebot nicht gefunden',
-          description: 'Dieses Angebot existiert nicht mehr.',
-          color: 0xe74c3c
-        })).catch(() => null);
-        return true;
-      }
-
-      await interaction.editReply(buildMarketListingPayload(player, listing)).catch(() => null);
-      return true;
-    }
-
-    if (interaction.isStringSelectMenu() && interaction.customId === 'camp:market:mylistings') {
-      const ok = await safeDeferUpdate(interaction);
-      if (!ok) return false;
-
-      const player = getPlayerByDiscordUserId(interaction.user.id);
-      if (!player) {
-        await interaction.editReply(getMissingPlayerPayload()).catch(() => null);
-        return true;
-      }
-
-      const listingId = Number(interaction.values[0]);
-      if (!listingId) {
-        await interaction.editReply(buildMarketPayload(player)).catch(() => null);
-        return true;
-      }
-
-      const listing = getListingById(listingId);
-      if (!listing) {
-        await interaction.editReply(buildMarketResultPayload({
-          title: '❌ Angebot nicht gefunden',
-          description: 'Dieses Angebot existiert nicht mehr.',
-          color: 0xe74c3c
-        })).catch(() => null);
-        return true;
-      }
-
-      await interaction.editReply(buildOwnListingPayload(listing)).catch(() => null);
-      return true;
-    }
-
     if (interaction.isStringSelectMenu() && interaction.customId === 'camp:actions:menu') {
       const ok = await safeDeferUpdate(interaction);
       if (!ok) return false;
 
       const player = getPlayerByDiscordUserId(interaction.user.id);
+
       if (!player) {
-        await interaction.editReply(getMissingPlayerPayload()).catch(() => null);
+        await interaction.editReply({
+          content: 'Du hast noch kein Abenteuer begonnen. Öffne das Menü bitte erneut über die feste Aktionsnachricht.',
+          embeds: [],
+          components: []
+        }).catch(() => null);
         return true;
       }
 
       const value = interaction.values[0];
+
+      if (value === 'profil') {
+        await interaction.editReply(buildProfilePayload(player)).catch(() => null);
+        return true;
+      }
+
+      if (value === 'sammeln') {
+        await interaction.editReply(await runSammeln(player, interaction)).catch(() => null);
+        return true;
+      }
+
+      if (value === 'arbeiten') {
+        await interaction.editReply(await runArbeiten(player, interaction)).catch(() => null);
+        return true;
+      }
+
+      if (value === 'trainieren') {
+        await interaction.editReply(await runTrainieren(player, interaction)).catch(() => null);
+        return true;
+      }
+
+      if (value === 'erkunden') {
+        await interaction.editReply(await runErkunden(player, interaction)).catch(() => null);
+        return true;
+      }
+
+      if (value === 'schmiede') {
+        await interaction.editReply(buildForgePayload(player)).catch(() => null);
+        return true;
+      }
+
 
       if (value === 'profil') {
         await interaction.editReply(buildProfilePayload(player)).catch(() => null);
@@ -1963,11 +1261,6 @@ module.exports = {
         return true;
       }
 
-      if (value === 'markt') {
-        await interaction.editReply(buildMarketPayload(player)).catch(() => null);
-        return true;
-      }
-
       if (value === 'lager') {
         await interaction.editReply(buildLagerPayload()).catch(() => null);
         return true;
@@ -1978,75 +1271,6 @@ module.exports = {
         embeds: [],
         components: []
       }).catch(() => null);
-
-      return true;
-    }
-
-    if (interaction.isModalSubmit() && interaction.customId.startsWith('camp:market:create:')) {
-      const ok = await safeDeferReply(interaction);
-      if (!ok) return false;
-
-      const player = getPlayerByDiscordUserId(interaction.user.id);
-      if (!player) {
-        await interaction.editReply(getMissingPlayerPayload()).catch(() => null);
-        return true;
-      }
-
-      const itemKey = interaction.customId.split(':').slice(-1)[0];
-      const item = getItemDefinition(itemKey);
-      if (!item) {
-        await interaction.editReply(buildMarketResultPayload({
-          title: '❌ Item nicht gefunden',
-          description: 'Dieses Item ist nicht definiert.',
-          color: 0xe74c3c
-        })).catch(() => null);
-        return true;
-      }
-
-      const quantityRaw = interaction.fields.getTextInputValue('quantity');
-      const priceRaw = interaction.fields.getTextInputValue('price');
-      const quantity = Number(quantityRaw);
-
-      if (!Number.isInteger(quantity) || quantity <= 0) {
-        await interaction.editReply(buildMarketResultPayload({
-          title: '❌ Ungültige Menge',
-          description: 'Bitte gib eine ganze Zahl größer als 0 an.',
-          color: 0xe74c3c
-        })).catch(() => null);
-        return true;
-      }
-
-      try {
-        const price = parsePriceInput(priceRaw);
-        const listing = createListing({
-          sellerPlayerId: player.id,
-          itemKey,
-          quantity,
-          price
-        });
-
-        await interaction.editReply({
-          content: '',
-          embeds: [
-            new EmbedBuilder()
-              .setTitle('📬 Angebot eingestellt')
-              .setDescription(
-                `Du hast **${listing.quantity}x ${listing.item?.label || listing.item_key}** auf dem Markt eingestellt.
-
-` +
-                `Preis gesamt: ${formatResourceMap(listing.price, true)}`
-              )
-              .setColor(0x2ecc71)
-          ],
-          components: [buildMarketBackRow(), buildBackRow()]
-        }).catch(() => null);
-      } catch (error) {
-        await interaction.editReply(buildMarketResultPayload({
-          title: '❌ Angebot konnte nicht erstellt werden',
-          description: String(error.message || error),
-          color: 0xe74c3c
-        })).catch(() => null);
-      }
 
       return true;
     }

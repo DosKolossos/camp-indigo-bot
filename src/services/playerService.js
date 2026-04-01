@@ -4,7 +4,8 @@ const { calculateLevelFromXp } = require('./progressionService');
 const ACTION_COOLDOWN_FIELDS = {
   sammeln: 'sammeln_cooldown_until',
   arbeiten: 'arbeiten_cooldown_until',
-  trainieren: 'trainieren_cooldown_until'
+  trainieren: 'trainieren_cooldown_until',
+  expedition: 'expedition_cooldown_until'
 };
 
 function ensurePlayerColumn(name, definition) {
@@ -17,6 +18,7 @@ function ensurePlayerColumn(name, definition) {
 }
 
 ensurePlayerColumn('trainieren_cooldown_until', 'TEXT');
+ensurePlayerColumn('expedition_cooldown_until', 'TEXT');
 ensurePlayerColumn('busy_until', 'TEXT');
 ensurePlayerColumn('busy_activity', 'TEXT');
 ensurePlayerColumn('exploration_points', 'INTEGER NOT NULL DEFAULT 0');
@@ -222,6 +224,7 @@ function resetPlayerCooldowns(discordUserId) {
     SET sammeln_cooldown_until = NULL,
         arbeiten_cooldown_until = NULL,
         trainieren_cooldown_until = NULL,
+        expedition_cooldown_until = NULL,
         updated_at = ?
     WHERE discord_user_id = ?
   `).run(new Date().toISOString(), discordUserId);
@@ -243,6 +246,7 @@ function resetAllCooldowns() {
     SET sammeln_cooldown_until = NULL,
         arbeiten_cooldown_until = NULL,
         trainieren_cooldown_until = NULL,
+        expedition_cooldown_until = NULL,
         updated_at = ?
   `).run(new Date().toISOString());
 }
@@ -333,6 +337,7 @@ function updatePlayerAdmin(id, payload = {}) {
         sammeln_cooldown_until = ?,
         arbeiten_cooldown_until = ?,
         trainieren_cooldown_until = ?,
+        expedition_cooldown_until = ?,
         busy_until = ?,
         busy_activity = ?,
         updated_at = ?
@@ -358,6 +363,7 @@ function updatePlayerAdmin(id, payload = {}) {
     normalizeNullableDate(nextPlayer.sammeln_cooldown_until),
     normalizeNullableDate(nextPlayer.arbeiten_cooldown_until),
     normalizeNullableDate(nextPlayer.trainieren_cooldown_until),
+    normalizeNullableDate(nextPlayer.expedition_cooldown_until),
     normalizeNullableDate(nextPlayer.busy_until),
     nextPlayer.busy_activity || null,
     now,

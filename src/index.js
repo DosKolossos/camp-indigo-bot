@@ -98,7 +98,7 @@ if (!ENABLE_DISCORD_BOT) {
         return;
       }
 
-      if (interaction.isButton() || interaction.isStringSelectMenu() || interaction.isModalSubmit()) {
+      if (interaction.isButton() || interaction.isStringSelectMenu()) {
         if (startFlow.canHandleInteraction(interaction)) {
           const handled = await startFlow.handleInteraction(interaction);
           if (handled !== false) return;
