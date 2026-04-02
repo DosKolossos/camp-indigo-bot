@@ -39,7 +39,28 @@ const TRAINIEREN_UNLOCK_CAMP_LEVEL = 2;
 const ERKUNDEN_UNLOCK_CAMP_LEVEL = 3;
 const SCHMIEDE_UNLOCK_CAMP_LEVEL = 4;
 const EXPEDITION_UNLOCK_CAMP_LEVEL = 4;
+
 const ERKUNDEN_BUSY_MS = 60 * 60 * 1000;
+const EXPEDITION_BUSY_MS = parseDurationMs(
+  process.env.EXPEDITION_BUSY_MINUTES,
+  60 * 60 * 1000,
+  60 * 1000
+);
+
+const BUSY_BLOCKED_ACTIONS = new Set([
+  'sammeln',
+  'arbeiten',
+  'trainieren',
+  'erkunden',
+  'schmiede',
+  'expedition'
+]);
+
+const FORGE_ACTION_FIELDS = {
+  'camp:forge:weapon': 'weapon_tier',
+  'camp:forge:armor': 'armor_tier',
+  'camp:forge:scanner': 'scanner_tier'
+};
 
 function parseDurationMs(envValue, fallback, multiplier = 1) {
   const numericValue = Number(envValue);
@@ -82,12 +103,28 @@ async function safeDeferUpdate(interaction) {
   }
 }
 
+async function safeEditReply(interaction, payload) {
+  await interaction.editReply(payload).catch(() => null);
+}
+
 function getStarter(key) {
   return starters.find(item => item.key === key) || null;
 }
 
 function getGuild(key) {
   return guilds.find(item => item.key === key) || null;
+}
+
+function clampMin(value, minValue) {
+  return Math.max(minValue, value);
+}
+
+function randomInt(min, max) {
+  return Math.floor(Math.random() * (max - min + 1)) + min;
+}
+
+function getPlayerStats(player) {
+  return calculateScaledStats(player.pokemon_key, player.level);
 }
 
 function getXpProgressText(player) {
@@ -117,14 +154,6 @@ function buildBackRow() {
       .setLabel('Zurück zum Aktionsmenü')
       .setStyle(ButtonStyle.Secondary)
   );
-}
-
-function clampMin(value, minValue) {
-  return Math.max(minValue, value);
-}
-
-function getPlayerStats(player) {
-  return calculateScaledStats(player.pokemon_key, player.level);
 }
 
 function getTempoAdjustedCooldownMs(baseCooldownMs, tempo = 0) {
@@ -193,13 +222,11 @@ function getBusyStatus(player) {
     };
   }
 
-  const activityLabel = getBusyActivityLabel(activityKey);
-
   return {
     isBusy: true,
     remainingMs,
     activityKey,
-    label: `🧭 Du bist aktuell auf **${activityLabel}**.\nRückkehr in **${formatRemaining(remainingMs)}**.`
+    label: `🧭 Du bist aktuell auf **${getBusyActivityLabel(activityKey)}**.\nRückkehr in **${formatRemaining(remainingMs)}**.`
   };
 }
 
@@ -251,24 +278,6 @@ function getCampState() {
   return { totals, progress };
 }
 
-function getUnlockedActionKeys(campLevel) {
-  const keys = ['profil', 'sammeln', 'arbeiten', 'lager'];
-
-  if (campLevel >= TRAINIEREN_UNLOCK_CAMP_LEVEL) {
-    keys.push('trainieren');
-  }
-
-  if (campLevel >= ERKUNDEN_UNLOCK_CAMP_LEVEL) {
-    keys.push('erkunden');
-  }
-
-  if (campLevel >= SCHMIEDE_UNLOCK_CAMP_LEVEL) {
-    keys.push('schmiede', 'expedition');
-  }
-
-  return keys;
-}
-
 function getNextUnlockHint(campLevel) {
   if (campLevel < TRAINIEREN_UNLOCK_CAMP_LEVEL) {
     return `🔒 Nächste Freischaltung: **Trainieren** ab Camp-Stufe ${TRAINIEREN_UNLOCK_CAMP_LEVEL}`;
@@ -285,6 +294,10 @@ function getNextUnlockHint(campLevel) {
   return '✨ Alle aktuell eingebauten Camp-Aktionen sind freigeschaltet.';
 }
 
+function getBlockedActionDescription(busy) {
+  return `Gesperrt: Du bist auf ${getBusyActivityLabel(busy.activityKey)}`;
+}
+
 function buildActionOptions({ busy, cooldowns, trainingUnlocked, erkundenUnlocked, forgeUnlocked, expeditionUnlocked }) {
   const options = [
     {
@@ -296,7 +309,7 @@ function buildActionOptions({ busy, cooldowns, trainingUnlocked, erkundenUnlocke
     {
       label: 'Sammeln',
       description: busy.isBusy
-        ? `Gesperrt: Du bist auf ${getBusyActivityLabel(busy.activityKey)}`
+        ? getBlockedActionDescription(busy)
         : cooldowns.sammelnRemaining > 0
           ? `Wieder bereit in ${formatRemaining(cooldowns.sammelnRemaining)}`
           : 'Sammle Holz, Nahrung, Stein und XP',
@@ -306,7 +319,7 @@ function buildActionOptions({ busy, cooldowns, trainingUnlocked, erkundenUnlocke
     {
       label: 'Arbeiten',
       description: busy.isBusy
-        ? `Gesperrt: Du bist auf ${getBusyActivityLabel(busy.activityKey)}`
+        ? getBlockedActionDescription(busy)
         : cooldowns.arbeitenRemaining > 0
           ? `Wieder bereit in ${formatRemaining(cooldowns.arbeitenRemaining)}`
           : 'Hilf dem Lager beim Ausbau',
@@ -319,7 +332,7 @@ function buildActionOptions({ busy, cooldowns, trainingUnlocked, erkundenUnlocke
     options.push({
       label: 'Trainieren',
       description: busy.isBusy
-        ? `Gesperrt: Du bist auf ${getBusyActivityLabel(busy.activityKey)}`
+        ? getBlockedActionDescription(busy)
         : cooldowns.trainierenRemaining > 0
           ? `Wieder bereit in ${formatRemaining(cooldowns.trainierenRemaining)}`
           : 'Steigere deine Werte über XP',
@@ -332,7 +345,7 @@ function buildActionOptions({ busy, cooldowns, trainingUnlocked, erkundenUnlocke
     options.push({
       label: 'Erkunden',
       description: busy.isBusy
-        ? `Gesperrt: Du bist auf ${getBusyActivityLabel(busy.activityKey)}`
+        ? getBlockedActionDescription(busy)
         : 'Verdiene Erkundungspunkte und finde Materialien',
       value: 'erkunden',
       emoji: '🧭'
@@ -342,7 +355,9 @@ function buildActionOptions({ busy, cooldowns, trainingUnlocked, erkundenUnlocke
   if (forgeUnlocked) {
     options.push({
       label: 'Schmiede',
-      description: 'Baue Waffen, Rüstungen und Suchgeräte',
+      description: busy.isBusy
+        ? getBlockedActionDescription(busy)
+        : 'Baue Waffen, Rüstungen und Suchgeräte',
       value: 'schmiede',
       emoji: '⚒️'
     });
@@ -352,7 +367,7 @@ function buildActionOptions({ busy, cooldowns, trainingUnlocked, erkundenUnlocke
     options.push({
       label: 'Expedition',
       description: busy.isBusy
-        ? `Gesperrt: Du bist auf ${getBusyActivityLabel(busy.activityKey)}`
+        ? getBlockedActionDescription(busy)
         : cooldowns.expeditionRemaining > 0
           ? `Wieder bereit in ${formatRemaining(cooldowns.expeditionRemaining)}`
           : 'Bestehe gefährliche Ausflüge für bessere Beute',
@@ -389,7 +404,7 @@ function buildBusyPayload(player) {
 
   return buildLockedPayload(
     '🧭 Du bist gerade unterwegs',
-    `${busy.label}\n\nWährend du unterwegs bist, kannst du im Camp keine Dorfaktion starten.`
+    `${busy.label}\n\nWährend du unterwegs bist, kannst du keine Aktion im Camp starten und auch nicht die Schmiede benutzen.`
   );
 }
 
@@ -455,7 +470,7 @@ function canAffordCosts(player, costs = {}) {
   return Object.entries(costs).every(([key, amount]) => (Number(player[key]) || 0) >= (Number(amount) || 0));
 }
 
-function buildForgeButtons(player) {
+function buildForgeButtons(player, disabled = false) {
   const weaponTier = Number(player.weapon_tier) || 0;
   const armorTier = Number(player.armor_tier) || 0;
   const scannerTier = Number(player.scanner_tier) || 0;
@@ -466,17 +481,17 @@ function buildForgeButtons(player) {
         .setCustomId('camp:forge:weapon')
         .setLabel(weaponTier >= EQUIPMENT_MAX_TIER ? 'Waffe max' : 'Waffe schmieden')
         .setStyle(ButtonStyle.Primary)
-        .setDisabled(weaponTier >= EQUIPMENT_MAX_TIER),
+        .setDisabled(disabled || weaponTier >= EQUIPMENT_MAX_TIER),
       new ButtonBuilder()
         .setCustomId('camp:forge:armor')
         .setLabel(armorTier >= EQUIPMENT_MAX_TIER ? 'Rüstung max' : 'Rüstung schmieden')
         .setStyle(ButtonStyle.Secondary)
-        .setDisabled(armorTier >= EQUIPMENT_MAX_TIER),
+        .setDisabled(disabled || armorTier >= EQUIPMENT_MAX_TIER),
       new ButtonBuilder()
         .setCustomId('camp:forge:scanner')
         .setLabel(scannerTier >= EQUIPMENT_MAX_TIER ? 'Suchgerät max' : 'Suchgerät bauen')
         .setStyle(ButtonStyle.Success)
-        .setDisabled(scannerTier >= EQUIPMENT_MAX_TIER)
+        .setDisabled(disabled || scannerTier >= EQUIPMENT_MAX_TIER)
     ),
     new ActionRowBuilder().addComponents(
       new ButtonBuilder()
@@ -488,6 +503,7 @@ function buildForgeButtons(player) {
 }
 
 function buildForgePayload(player) {
+  const busy = getBusyStatus(player);
   const weaponTier = Number(player.weapon_tier) || 0;
   const armorTier = Number(player.armor_tier) || 0;
   const scannerTier = Number(player.scanner_tier) || 0;
@@ -496,29 +512,35 @@ function buildForgePayload(player) {
   const nextArmorTier = Math.min(armorTier + 1, EQUIPMENT_MAX_TIER);
   const nextScannerTier = Math.min(scannerTier + 1, EQUIPMENT_MAX_TIER);
 
-  const embed = new EmbedBuilder()
-    .setTitle('⚒️ Werkbank & Schmiede')
-    .setDescription(
-      `**Aktuelle Ausrüstung**\n` +
+  const descriptionParts = [
+    `**Aktuelle Ausrüstung**\n` +
       `Waffe: ${getEquipmentTierName('weapon_tier', weaponTier)}\n` +
       `Rüstung: ${getEquipmentTierName('armor_tier', armorTier)}\n` +
-      `Suchgerät: ${getEquipmentTierName('scanner_tier', scannerTier)}\n\n` +
-      `**Materialien**\n` +
+      `Suchgerät: ${getEquipmentTierName('scanner_tier', scannerTier)}`,
+    `**Materialien**\n` +
       `⛏️ Erz: ${player.ore || 0}\n` +
       `🧵 Fasern: ${player.fiber || 0}\n` +
-      `🪛 Schrott: ${player.scrap || 0}\n\n` +
-      `**Nächste Rezepte**\n` +
+      `🪛 Schrott: ${player.scrap || 0}`,
+    `**Nächste Rezepte**\n` +
       `${weaponTier >= EQUIPMENT_MAX_TIER ? 'Waffe: Max-Stufe' : `Waffe T${nextWeaponTier}: ${formatRecipeCost(CRAFTING_RECIPES.weapon_tier[nextWeaponTier])}`}\n` +
       `${armorTier >= EQUIPMENT_MAX_TIER ? 'Rüstung: Max-Stufe' : `Rüstung T${nextArmorTier}: ${formatRecipeCost(CRAFTING_RECIPES.armor_tier[nextArmorTier])}`}\n` +
-      `${scannerTier >= EQUIPMENT_MAX_TIER ? 'Suchgerät: Max-Stufe' : `Suchgerät T${nextScannerTier}: ${formatRecipeCost(CRAFTING_RECIPES.scanner_tier[nextScannerTier])}`}\n\n` +
-      `Waffen erhöhen deine **Kampfkraft**, Rüstungen geben **Sicherheit**, Suchgeräte verbessern deine **Beute** auf Expeditionen.`
-    )
+      `${scannerTier >= EQUIPMENT_MAX_TIER ? 'Suchgerät: Max-Stufe' : `Suchgerät T${nextScannerTier}: ${formatRecipeCost(CRAFTING_RECIPES.scanner_tier[nextScannerTier])}`}`,
+    'Waffen erhöhen deine **Kampfkraft**, Rüstungen geben **Sicherheit**, Suchgeräte verbessern deine **Beute** auf Expeditionen.'
+  ];
+
+  if (busy.isBusy) {
+    descriptionParts.unshift(`${busy.label}\nDie Schmiede ist blockiert, bis du zurück bist.`);
+  }
+
+  const embed = new EmbedBuilder()
+    .setTitle('⚒️ Werkbank & Schmiede')
+    .setDescription(descriptionParts.join('\n\n'))
     .setColor(0xf39c12);
 
   return {
     content: '',
     embeds: [embed],
-    components: buildForgeButtons(player)
+    components: buildForgeButtons(player, busy.isBusy)
   };
 }
 
@@ -594,12 +616,11 @@ function buildActionMenu(player) {
   const cooldowns = getActionStatus(player);
   const busy = getBusyStatus(player);
   const camp = getCampState().progress;
+
   const trainingUnlocked = camp.level >= TRAINIEREN_UNLOCK_CAMP_LEVEL;
   const erkundenUnlocked = camp.level >= ERKUNDEN_UNLOCK_CAMP_LEVEL;
   const forgeUnlocked = camp.level >= SCHMIEDE_UNLOCK_CAMP_LEVEL;
   const expeditionUnlocked = camp.level >= EXPEDITION_UNLOCK_CAMP_LEVEL;
-
-  const nextUnlockHint = getNextUnlockHint(camp.level);
 
   const statusLines = [
     busy.label,
@@ -633,9 +654,8 @@ function buildActionMenu(player) {
       `**Level:** ${player.level}\n` +
       `**Fortschritt:** ${getXpProgressText(player)}\n` +
       `**Camp-Stufe:** ${camp.level} (${camp.phaseLabel})\n\n` +
-      `**Status**\n` +
-      `${statusLines.join('\n')}\n\n` +
-      `${nextUnlockHint}\n\n` +
+      `**Status**\n${statusLines.join('\n')}\n\n` +
+      `${getNextUnlockHint(camp.level)}\n\n` +
       'Wähle deine nächste Aktion.'
     )
     .setFooter({
@@ -650,7 +670,6 @@ function buildActionMenu(player) {
         ? `Unterwegs: ${getBusyActivityLabel(busy.activityKey)}`
         : 'Aktion auswählen'
     )
-    .setDisabled(busy.isBusy)
     .addOptions(actionOptions);
 
   return {
@@ -673,6 +692,14 @@ function buildProfilePayload(player) {
   const progressText = xpProgress.isMaxLevel
     ? 'Max-Level erreicht'
     : `${xpProgress.currentXpInLevel}/${xpProgress.neededForNextLevel} XP bis Level ${xpProgress.nextLevel}`;
+
+  const statusLines = [busy.label, cooldowns.sammelnLabel, cooldowns.arbeitenLabel];
+  if (camp.level >= TRAINIEREN_UNLOCK_CAMP_LEVEL) {
+    statusLines.push(cooldowns.trainierenLabel);
+  }
+  if (camp.level >= EXPEDITION_UNLOCK_CAMP_LEVEL) {
+    statusLines.push(cooldowns.expeditionLabel);
+  }
 
   const embed = new EmbedBuilder()
     .setTitle(`📜 Profil von ${player.discord_username}`)
@@ -700,12 +727,7 @@ function buildProfilePayload(player) {
       `Waffe: ${getEquipmentTierName('weapon_tier', Number(player.weapon_tier) || 0)}\n` +
       `Rüstung: ${getEquipmentTierName('armor_tier', Number(player.armor_tier) || 0)}\n` +
       `Suchgerät: ${getEquipmentTierName('scanner_tier', Number(player.scanner_tier) || 0)}\n\n` +
-      `**Status**\n` +
-      `${busy.label}\n` +
-      `${cooldowns.sammelnLabel}\n` +
-      `${cooldowns.arbeitenLabel}\n` +
-      `${cooldowns.trainierenLabel}` +
-      `${camp.level >= EXPEDITION_UNLOCK_CAMP_LEVEL ? `\n${cooldowns.expeditionLabel}` : ""}`
+      `**Status**\n${statusLines.join('\n')}`
     )
     .setColor(guild?.color ?? 0x2ecc71);
 
@@ -714,10 +736,6 @@ function buildProfilePayload(player) {
     embeds: [embed],
     components: [buildBackRow()]
   };
-}
-
-function randomInt(min, max) {
-  return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 
 async function runSammeln(player, interaction) {
@@ -788,7 +806,7 @@ async function runArbeiten(player, interaction) {
   const contribution = randomInt(2, 4) + Math.floor((stats.kraft || 0) / 4);
   const wood = randomInt(0, 1) + Math.floor((stats.geschick || 0) / 9);
   const stone = randomInt(0, 1) + Math.floor((stats.kraft || 0) / 10);
-  const xp = randomInt(2, 4) + Math.floor((((stats.kraft || 0) + (stats.ausdauer || 0))) / 12);
+  const xp = randomInt(2, 4) + Math.floor(((stats.kraft || 0) + (stats.ausdauer || 0)) / 12);
 
   const result = await applyProgressWithLevelUpAnnouncement({
     client: interaction.client,
@@ -849,9 +867,7 @@ async function runTrainieren(player, interaction) {
     return buildCooldownPayload('Trainieren', remainingMs);
   }
 
-  const xp =
-    randomInt(6, 9) +
-    Math.floor(((stats.kraft || 0) + (stats.tempo || 0)) / 8);
+  const xp = randomInt(6, 9) + Math.floor(((stats.kraft || 0) + (stats.tempo || 0)) / 8);
 
   const result = await applyProgressWithLevelUpAnnouncement({
     client: interaction.client,
@@ -859,9 +875,7 @@ async function runTrainieren(player, interaction) {
     changes: { xp }
   });
 
-  logPlayerActivity(player.discord_user_id, 'trainieren', {
-    xp
-  });
+  logPlayerActivity(player.discord_user_id, 'trainieren', { xp });
 
   const cooldownUntil = new Date(Date.now() + cooldowns.trainierenCooldownMs).toISOString();
   setActionCooldown(player.discord_user_id, 'trainieren', cooldownUntil);
@@ -879,7 +893,6 @@ async function runTrainieren(player, interaction) {
   });
 }
 
-
 async function runErkunden(player, interaction) {
   const busy = getBusyStatus(player);
   if (busy.isBusy) {
@@ -895,14 +908,8 @@ async function runErkunden(player, interaction) {
   }
 
   const stats = getPlayerStats(player);
-  const explorationPoints =
-    randomInt(4, 7) +
-    Math.floor(((stats.instinkt || 0) + (stats.geschick || 0)) / 10);
-
-  const xp =
-    randomInt(4, 7) +
-    Math.floor((stats.tempo || 0) / 6);
-
+  const explorationPoints = randomInt(4, 7) + Math.floor(((stats.instinkt || 0) + (stats.geschick || 0)) / 10);
+  const xp = randomInt(4, 7) + Math.floor((stats.tempo || 0) / 6);
   const foodCost = 1;
 
   if ((player.food || 0) < foodCost) {
@@ -986,8 +993,8 @@ async function runExpedition(player, interaction) {
   const ore = success ? randomInt(1, 2) : randomInt(0, 1);
   const fiber = success ? randomInt(1, 2) : randomInt(0, 1);
   const scrap = success ? randomInt(1, 2) : randomInt(0, 1);
-  const bonusRoll = randomInt(1, 100);
-  const bonusHit = bonusRoll <= lootBonusPercent;
+
+  const bonusHit = randomInt(1, 100) <= lootBonusPercent;
   const bonusOre = bonusHit ? 1 : 0;
   const bonusFiber = bonusHit ? 1 : 0;
   const bonusScrap = bonusHit ? 1 : 0;
@@ -1005,21 +1012,32 @@ async function runExpedition(player, interaction) {
     }
   });
 
+  const cooldownUntil = new Date(Date.now() + cooldowns.expeditionCooldownMs).toISOString();
+  setActionCooldown(player.discord_user_id, 'expedition', cooldownUntil);
+
+  const busyUntil = new Date(Date.now() + EXPEDITION_BUSY_MS).toISOString();
+  setPlayerBusy(player.discord_user_id, 'expedition', busyUntil);
+
   logPlayerActivity(player.discord_user_id, 'expedition', {
     food: -foodCost,
     exploration_points: baseExploration,
-    xp
+    xp,
+    ore: ore + bonusOre,
+    fiber: fiber + bonusFiber,
+    scrap: scrap + bonusScrap,
+    busy_until: busyUntil,
+    cooldown_until: cooldownUntil,
+    success,
+    difficulty,
+    expedition_roll: expeditionRoll
   });
-
-  const cooldownUntil = new Date(Date.now() + cooldowns.expeditionCooldownMs).toISOString();
-  setActionCooldown(player.discord_user_id, 'expedition', cooldownUntil);
 
   await syncCampStatusMessage(interaction.client, player.guild_key).catch(() => null);
 
   return buildActionResultPayload({
-    title: success ? '🗺️ Expedition gelungen' : '🗺️ Expedition überstanden',
+    title: '🗺️ Expedition gestartet',
     description:
-      `${success ? 'Du hast die Expedition erfolgreich abgeschlossen.' : 'Die Expedition war hart, aber du bist mit etwas Beute zurückgekehrt.'}\n\n` +
+      `${success ? 'Du bist erfolgreich zu einer Expedition aufgebrochen.' : 'Die Expedition beginnt holprig, aber du bist unterwegs.'}\n\n` +
       `⚔️ Kampfkraft: ${combatPower} (Wurf ${expeditionRoll})\n` +
       `🎯 Schwierigkeit: ${difficulty}\n\n` +
       `-${foodCost} Nahrung\n` +
@@ -1029,7 +1047,8 @@ async function runExpedition(player, interaction) {
       `+${fiber + bonusFiber} Fasern\n` +
       `+${scrap + bonusScrap} Schrott\n` +
       `${bonusHit ? '\n🔎 Dein Suchgerät hat zusätzliche Beute entdeckt.\n' : '\n'}` +
-      `Nächste Expedition in **${formatRemaining(cooldowns.expeditionCooldownMs)}**.\n` +
+      `Rückkehr in **${formatRemaining(EXPEDITION_BUSY_MS)}**.\n` +
+      `Nächste Expedition in **${formatRemaining(cooldowns.expeditionCooldownMs)}**.` +
       `${result.levelUpText}`,
     color: success ? 0x1abc9c : 0x95a5a6
   });
@@ -1048,43 +1067,23 @@ function buildLagerPayload() {
       new EmbedBuilder()
         .setTitle('🏕️ Lagerstatus')
         .setDescription(
-          `**Camp-Stufe:** ${camp.level}
-` +
-          `**Phase:** ${camp.phaseLabel}
-` +
-          `**Camp-Fortschritt:** ${campProgressText}
-
-` +
-          `**Abenteurer:** ${totals.players}
-` +
-          `**Gesamt-XP:** ${totals.xp}
-
-` +
-          `**🪵 Holz:** ${totals.wood}
-` +
-          `**🍖 Nahrung:** ${totals.food}
-` +
-          `**🪨 Stein:** ${totals.stone}
-` +
-          `**⛏️ Erz:** ${totals.ore || 0}
-` +
-          `**🧵 Fasern:** ${totals.fiber || 0}
-` +
-          `**🪛 Schrott:** ${totals.scrap || 0}
-` +
-          `**🏗️ Gesamtbeitrag:** ${totals.contribution}
-` +
-          `**🧭 Erkundungspunkte:** ${totals.exploration_points || 0}
-
-` +
-          `**Freischaltungen**
-` +
-          `Stufe 1: Sammeln, Arbeiten
-` +
-          `Stufe 2: Trainieren
-` +
-          `Stufe 3: Erkunden
-` +
+          `**Camp-Stufe:** ${camp.level}\n` +
+          `**Phase:** ${camp.phaseLabel}\n` +
+          `**Camp-Fortschritt:** ${campProgressText}\n\n` +
+          `**Abenteurer:** ${totals.players}\n` +
+          `**Gesamt-XP:** ${totals.xp}\n\n` +
+          `**🪵 Holz:** ${totals.wood}\n` +
+          `**🍖 Nahrung:** ${totals.food}\n` +
+          `**🪨 Stein:** ${totals.stone}\n` +
+          `**⛏️ Erz:** ${totals.ore || 0}\n` +
+          `**🧵 Fasern:** ${totals.fiber || 0}\n` +
+          `**🪛 Schrott:** ${totals.scrap || 0}\n` +
+          `**🏗️ Gesamtbeitrag:** ${totals.contribution}\n` +
+          `**🧭 Erkundungspunkte:** ${totals.exploration_points || 0}\n\n` +
+          `**Freischaltungen**\n` +
+          `Stufe 1: Sammeln, Arbeiten\n` +
+          `Stufe 2: Trainieren\n` +
+          `Stufe 3: Erkunden\n` +
           `Stufe 4: Schmiede, Expedition`
         )
         .setColor(0xf1c40f)
@@ -1093,17 +1092,22 @@ function buildLagerPayload() {
   };
 }
 
+function buildMissingPlayerPayload() {
+  return {
+    content: 'Du hast noch kein Abenteuer begonnen. Öffne das Menü bitte erneut über die feste Startnachricht.',
+    embeds: [],
+    components: []
+  };
+}
+
 module.exports = {
   canHandleInteraction(interaction) {
     return Boolean(
-      interaction.customId &&
-      (
+      interaction.customId && (
         interaction.customId === 'camp:actions:open' ||
         interaction.customId === 'camp:actions:back' ||
         interaction.customId === 'camp:actions:menu' ||
-        interaction.customId === 'camp:forge:weapon' ||
-        interaction.customId === 'camp:forge:armor' ||
-        interaction.customId === 'camp:forge:scanner'
+        interaction.customId in FORGE_ACTION_FIELDS
       )
     );
   },
@@ -1114,17 +1118,16 @@ module.exports = {
       if (!ok) return false;
 
       const player = getPlayerByDiscordUserId(interaction.user.id);
-
       if (!player) {
-        await interaction.editReply({
+        await safeEditReply(interaction, {
           content: 'Du hast noch kein Abenteuer begonnen. Nutze zuerst die Startnachricht.',
           embeds: [],
           components: []
-        }).catch(() => null);
+        });
         return true;
       }
 
-      await interaction.editReply(buildActionMenu(player)).catch(() => null);
+      await safeEditReply(interaction, buildActionMenu(player));
       return true;
     }
 
@@ -1133,49 +1136,28 @@ module.exports = {
       if (!ok) return false;
 
       const player = getPlayerByDiscordUserId(interaction.user.id);
-
       if (!player) {
-        await interaction.editReply({
-          content: 'Du hast noch kein Abenteuer begonnen. Öffne das Menü bitte erneut über die feste Aktionsnachricht.',
-          embeds: [],
-          components: []
-        }).catch(() => null);
+        await safeEditReply(interaction, buildMissingPlayerPayload());
         return true;
       }
 
-      await interaction.editReply(buildActionMenu(player)).catch(() => null);
+      await safeEditReply(interaction, buildActionMenu(player));
       return true;
     }
 
-    if (interaction.isButton() && interaction.customId.startsWith('camp:forge:')) {
+    if (interaction.isButton() && interaction.customId in FORGE_ACTION_FIELDS) {
       const ok = await safeDeferUpdate(interaction);
       if (!ok) return false;
 
       const player = getPlayerByDiscordUserId(interaction.user.id);
-
       if (!player) {
-        await interaction.editReply({
-          content: 'Du hast noch kein Abenteuer begonnen. Öffne das Menü bitte erneut über die feste Aktionsnachricht.',
-          embeds: [],
-          components: []
-        }).catch(() => null);
+        await safeEditReply(interaction, buildMissingPlayerPayload());
         return true;
       }
 
-      if (interaction.customId === 'camp:forge:weapon') {
-        await interaction.editReply(await runForgeUpgrade(player, interaction, 'weapon_tier')).catch(() => null);
-        return true;
-      }
-
-      if (interaction.customId === 'camp:forge:armor') {
-        await interaction.editReply(await runForgeUpgrade(player, interaction, 'armor_tier')).catch(() => null);
-        return true;
-      }
-
-      if (interaction.customId === 'camp:forge:scanner') {
-        await interaction.editReply(await runForgeUpgrade(player, interaction, 'scanner_tier')).catch(() => null);
-        return true;
-      }
+      const fieldName = FORGE_ACTION_FIELDS[interaction.customId];
+      await safeEditReply(interaction, await runForgeUpgrade(player, interaction, fieldName));
+      return true;
     }
 
     if (interaction.isStringSelectMenu() && interaction.customId === 'camp:actions:menu') {
@@ -1183,96 +1165,50 @@ module.exports = {
       if (!ok) return false;
 
       const player = getPlayerByDiscordUserId(interaction.user.id);
-
       if (!player) {
-        await interaction.editReply({
-          content: 'Du hast noch kein Abenteuer begonnen. Öffne das Menü bitte erneut über die feste Aktionsnachricht.',
-          embeds: [],
-          components: []
-        }).catch(() => null);
+        await safeEditReply(interaction, buildMissingPlayerPayload());
         return true;
       }
 
       const value = interaction.values[0];
-
-      if (value === 'profil') {
-        await interaction.editReply(buildProfilePayload(player)).catch(() => null);
+      if (getBusyStatus(player).isBusy && BUSY_BLOCKED_ACTIONS.has(value)) {
+        await safeEditReply(interaction, buildBusyPayload(player));
         return true;
       }
 
-      if (value === 'sammeln') {
-        await interaction.editReply(await runSammeln(player, interaction)).catch(() => null);
-        return true;
+      switch (value) {
+        case 'profil':
+          await safeEditReply(interaction, buildProfilePayload(player));
+          return true;
+        case 'sammeln':
+          await safeEditReply(interaction, await runSammeln(player, interaction));
+          return true;
+        case 'arbeiten':
+          await safeEditReply(interaction, await runArbeiten(player, interaction));
+          return true;
+        case 'trainieren':
+          await safeEditReply(interaction, await runTrainieren(player, interaction));
+          return true;
+        case 'erkunden':
+          await safeEditReply(interaction, await runErkunden(player, interaction));
+          return true;
+        case 'schmiede':
+          await safeEditReply(interaction, buildForgePayload(player));
+          return true;
+        case 'expedition':
+          await safeEditReply(interaction, await runExpedition(player, interaction));
+          return true;
+        case 'lager':
+          await safeEditReply(interaction, buildLagerPayload());
+          return true;
+        default:
+          await safeEditReply(interaction, {
+            content: 'Unbekannte Aktion. Öffne das Menü bitte erneut.',
+            embeds: [],
+            components: []
+          });
+          return true;
       }
-
-      if (value === 'arbeiten') {
-        await interaction.editReply(await runArbeiten(player, interaction)).catch(() => null);
-        return true;
-      }
-
-      if (value === 'trainieren') {
-        await interaction.editReply(await runTrainieren(player, interaction)).catch(() => null);
-        return true;
-      }
-
-      if (value === 'erkunden') {
-        await interaction.editReply(await runErkunden(player, interaction)).catch(() => null);
-        return true;
-      }
-
-      if (value === 'schmiede') {
-        await interaction.editReply(buildForgePayload(player)).catch(() => null);
-        return true;
-      }
-
-
-      if (value === 'profil') {
-        await interaction.editReply(buildProfilePayload(player)).catch(() => null);
-        return true;
-      }
-
-      if (value === 'sammeln') {
-        await interaction.editReply(await runSammeln(player, interaction)).catch(() => null);
-        return true;
-      }
-
-      if (value === 'arbeiten') {
-        await interaction.editReply(await runArbeiten(player, interaction)).catch(() => null);
-        return true;
-      }
-
-      if (value === 'trainieren') {
-        await interaction.editReply(await runTrainieren(player, interaction)).catch(() => null);
-        return true;
-      }
-
-      if (value === 'erkunden') {
-        await interaction.editReply(await runErkunden(player, interaction)).catch(() => null);
-        return true;
-      }
-
-      if (value === 'schmiede') {
-        await interaction.editReply(buildForgePayload(player)).catch(() => null);
-        return true;
-      }
-
-      if (value === 'expedition') {
-        await interaction.editReply(await runExpedition(player, interaction)).catch(() => null);
-        return true;
-      }
-
-      if (value === 'lager') {
-        await interaction.editReply(buildLagerPayload()).catch(() => null);
-        return true;
-      }
-
-      await interaction.editReply({
-        content: 'Unbekannte Aktion. Öffne das Menü bitte erneut.',
-        embeds: [],
-        components: []
-      }).catch(() => null);
-
-      return true;
     }
 
     return false;
