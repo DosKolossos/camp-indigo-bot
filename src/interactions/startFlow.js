@@ -178,6 +178,33 @@ module.exports = {
         return interaction.reply(buildStarterPayload(starters[0].key));
       }
 
+      if (interaction.customId === 'camp:start') {
+        const existingPlayer = getPlayerByDiscordUserId(interaction.user.id);
+
+        console.log('[camp:start]', {
+          interactionUserId: interaction.user.id,
+          username: interaction.user.username,
+          globalName: interaction.user.globalName,
+          existingPlayer: existingPlayer
+            ? {
+              id: existingPlayer.id,
+              discord_user_id: existingPlayer.discord_user_id,
+              discord_username: existingPlayer.discord_username,
+              pokemon_key: existingPlayer.pokemon_key,
+              guild_key: existingPlayer.guild_key,
+              level: existingPlayer.level,
+              xp: existingPlayer.xp
+            }
+            : null
+        });
+
+        if (existingPlayer) {
+          return interaction.reply(buildExistingProfilePayload(existingPlayer));
+        }
+
+        return interaction.reply(buildStarterPayload(starters[0].key));
+      }
+
       if (interaction.customId.startsWith('camp:starter:confirm:')) {
         const starterKey = interaction.customId.split(':')[3];
         return interaction.update(buildGuildPayload(starterKey, guilds[0].key));
