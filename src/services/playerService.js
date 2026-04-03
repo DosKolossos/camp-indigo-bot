@@ -322,6 +322,38 @@ function getLatestActivities(limit = 20) {
   `).all(limit);
 }
 
+function getTopContributorLast24Hours(guildKey = null) {
+  const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+
+  const row = db.prepare(`
+    SELECT
+      p.discord_user_id,
+      p.discord_username,
+      p.guild_key,
+      SUM(pal.contribution_delta) AS contribution_sum
+    FROM player_activity_log pal
+    JOIN players p
+      ON p.discord_user_id = pal.discord_user_id
+    WHERE pal.created_at >= ?
+      AND pal.contribution_delta > 0
+      ${guildKey ? 'AND p.guild_key = ?' : ''}
+    GROUP BY p.discord_user_id, p.discord_username, p.guild_key
+    ORDER BY contribution_sum DESC, p.discord_username ASC
+    LIMIT 1
+  `).get(...(guildKey ? [since, guildKey] : [since]));
+
+  if (!row) {
+    return null;
+  }
+
+  return {
+    discord_user_id: row.discord_user_id,
+    discord_username: row.discord_username,
+    guild_key: row.guild_key,
+    contribution: Number(row.contribution_sum || 0)
+  };
+}
+
 function normalizeNullableDate(value) {
   if (!value) return null;
   const timestamp = new Date(value).getTime();
@@ -418,5 +450,6 @@ module.exports = {
   resetAllBusy,
   resetAllActionState,
   getLatestActivities,
-  setPlayerStateById
+  setPlayerStateById,
+  getTopContributorLast24Hours
 };
