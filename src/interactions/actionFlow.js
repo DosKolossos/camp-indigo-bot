@@ -617,7 +617,7 @@ function buildActionOptions({
     });
   }
 
-    if (bossUnlocked) {
+  if (bossUnlocked) {
     options.push({
       label: 'Bossjagd',
       description: bossState?.isActive
@@ -738,12 +738,18 @@ function buildBossPayload(player) {
   }
 
   const bossState = getBossDisplayState(player);
-  const { event, boss, participation, busy } = bossState;
+  if (!bossState) {
+    // Fallback / "Bossjagd noch nicht verfügbar"
+    return buildLockedPayload(
+      '🔒 Bossjagd noch nicht verfügbar',
+      'Die Bossjagd ist noch nicht verfügbar. Bitte warte auf die Freischaltung.'
+    );
+  }
   const rewardSummary = Array.isArray(event.rewardSummary?.rewards)
     ? event.rewardSummary.rewards.slice(0, 6).map(entry => {
-        const summary = formatRewardSummary(entry.rewards || {});
-        return `• **${entry.username}**: ${summary || 'kein zusätzlicher Loot'}`;
-      }).join('\n')
+      const summary = formatRewardSummary(entry.rewards || {});
+      return `• **${entry.username}**: ${summary || 'kein zusätzlicher Loot'}`;
+    }).join('\n')
     : null;
 
   let description =
@@ -986,10 +992,10 @@ function buildForgeComponents(player) {
           craftOptions.length
             ? craftOptions
             : [{
-                label: 'Keine Kits verfügbar',
-                description: 'Aktuell sind keine Markt-Kits definiert.',
-                value: 'none'
-              }]
+              label: 'Keine Kits verfügbar',
+              description: 'Aktuell sind keine Markt-Kits definiert.',
+              value: 'none'
+            }]
         )
     ),
     new ActionRowBuilder().addComponents(
@@ -1001,10 +1007,10 @@ function buildForgeComponents(player) {
           usableOptions.length
             ? usableOptions
             : [{
-                label: 'Keine nutzbaren Kits',
-                description: 'Sammle oder kaufe passende Kits auf dem Markt.',
-                value: 'none'
-              }]
+              label: 'Keine nutzbaren Kits',
+              description: 'Sammle oder kaufe passende Kits auf dem Markt.',
+              value: 'none'
+            }]
         )
     ),
     buildBackRow()
@@ -1242,10 +1248,10 @@ function buildMarketPayload(player) {
             activeListings.length
               ? buildMarketListingOptions(activeListings)
               : [{
-                  label: 'Keine Angebote',
-                  description: 'Im Moment ist kein Angebot aktiv.',
-                  value: 'none'
-                }]
+                label: 'Keine Angebote',
+                description: 'Im Moment ist kein Angebot aktiv.',
+                value: 'none'
+              }]
           )
       ),
       new ActionRowBuilder().addComponents(
@@ -1257,10 +1263,10 @@ function buildMarketPayload(player) {
             sellableInventory.length
               ? buildSellableInventoryOptions(sellableInventory)
               : [{
-                  label: 'Nichts im Inventar',
-                  description: 'Stelle erst Kits in der Schmiede her.',
-                  value: 'none'
-                }]
+                label: 'Nichts im Inventar',
+                description: 'Stelle erst Kits in der Schmiede her.',
+                value: 'none'
+              }]
           )
       ),
       new ActionRowBuilder().addComponents(
@@ -1272,10 +1278,10 @@ function buildMarketPayload(player) {
             ownListings.length
               ? buildOwnListingOptions(ownListings)
               : [{
-                  label: 'Keine eigenen Angebote',
-                  description: 'Stelle ein Kit ein, um es hier zu verwalten.',
-                  value: 'none'
-                }]
+                label: 'Keine eigenen Angebote',
+                description: 'Stelle ein Kit ein, um es hier zu verwalten.',
+                value: 'none'
+              }]
           )
       ),
       buildBackRow()

@@ -25,6 +25,37 @@ function ensureColumn(tableName, columnName, definition) {
   }
 }
 
+function tableExists(tableName) {
+  const row = db.prepare(`
+    SELECT name
+    FROM sqlite_master
+    WHERE type = 'table' AND name = ?
+  `).get(tableName);
+
+  return Boolean(row);
+}
+
+function ensureGuildScopedBossTables() {
+  if (!tableExists('boss_events')) {
+    return;
+  }
+
+  const columns = db.prepare(`PRAGMA table_info(boss_events)`).all();
+  const hasGuildKey = columns.some(column => column.name === 'guild_key');
+
+  if (hasGuildKey) {
+    return;
+  }
+
+  console.log('[db] migrating boss tables to guild-scoped schema (resetting old boss data)');
+  ensureGuildScopedBossTables();
+
+  db.exec(`
+    DROP TABLE IF EXISTS boss_event_players;
+    DROP TABLE IF EXISTS boss_events;
+  `);
+}
+
 db.exec(`
   CREATE TABLE IF NOT EXISTS players (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -80,7 +111,8 @@ db.exec(`
 
   CREATE TABLE IF NOT EXISTS boss_events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    event_date TEXT NOT NULL UNIQUE,
+    guild_key TEXT NOT NULL,
+    event_date TEXT NOT NULL,
     boss_key TEXT NOT NULL,
     boss_name TEXT NOT NULL,
     boss_power INTEGER NOT NULL,
@@ -99,7 +131,8 @@ db.exec(`
     announced_result_at TEXT,
     reward_json TEXT,
     created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
+    updated_at TEXT NOT NULL,
+    UNIQUE(guild_key, event_date)
   );
 
   CREATE TABLE IF NOT EXISTS boss_event_players (
@@ -149,8 +182,11 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_player_items_player_id
     ON player_items(player_id);
 
-  CREATE INDEX IF NOT EXISTS idx_boss_events_status_spawn_at
-    ON boss_events(status, spawn_at);
+  CREATE INDEX IF NOT EXISTS idx_boss_events_guild_status_spawn_at
+    ON boss_events(guild_key, status, spawn_at);
+
+  CREATE INDEX IF NOT EXISTS idx_boss_events_event_date
+    ON boss_events(event_date);
 
   CREATE INDEX IF NOT EXISTS idx_boss_event_players_event_id
     ON boss_event_players(event_id);

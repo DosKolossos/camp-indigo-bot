@@ -2,7 +2,7 @@ const db = require('../db/database');
 const guilds = require('../config/guilds');
 const bosses = require('../config/bosses');
 const { getGuildChatChannelId, fetchTextChannel } = require('./channelService');
-const { calculateScaledStats } = require('./progressionService');
+const { calculateScaledStats, getCampProgress } = require('./progressionService');
 const {
   getPlayerByDiscordUserId,
   setPlayerBusy,
@@ -160,28 +160,64 @@ function getBossDateContext(now = new Date()) {
   };
 }
 
-function getBossEventByDate(dateKey) {
+function getGuildCampProgress(guildKey) {
+  const row = db.prepare(`
+    SELECT
+      COALESCE(SUM(contribution), 0) AS contribution,
+      COALESCE(SUM(exploration_points), 0) AS exploration_points
+    FROM players
+    WHERE guild_key = ?
+  `).get(guildKey);
+
+  return getCampProgress({
+    contribution: Number(row?.contribution || 0),
+    explorationPoints: Number(row?.exploration_points || 0)
+  });
+}
+
+function isBossUnlockedForGuild(guildKey) {
+  if (!guildKey) return false;
+  return getGuildCampProgress(guildKey).level >= 5;
+}
+
+function pickBossForGuildDate(guildKey, dateKey) {
+  const seed = `${guildKey}:${dateKey}`;
+  const score = String(seed)
+    .split('')
+    .reduce((sum, char) => sum + char.charCodeAt(0), 0);
+
+  return bosses[score % bosses.length] || bosses[0];
+}
+
+function getBossEventByDate(guildKey, dateKey) {
   const row = db.prepare(`
     SELECT *
     FROM boss_events
-    WHERE event_date = ?
-  `).get(dateKey);
+    WHERE guild_key = ?
+      AND event_date = ?
+  `).get(guildKey, dateKey);
 
   return row ? decorateBossEvent(row) : null;
 }
 
-function ensureTodayBossEvent() {
+function ensureTodayBossEvent(guildKey) {
+  if (!guildKey || !isBossUnlockedForGuild(guildKey)) {
+    return null;
+  }
+
   const { dateKey, spawnAt, resolveAt } = getBossDateContext();
-  const existing = getBossEventByDate(dateKey);
+  const existing = getBossEventByDate(guildKey, dateKey);
+
   if (existing) {
     return advancePendingBossState(existing.id);
   }
 
-  const boss = pickBossForDate(dateKey);
+  const boss = pickBossForGuildDate(guildKey, dateKey);
   const now = new Date().toISOString();
 
   db.prepare(`
     INSERT INTO boss_events (
+      guild_key,
       event_date,
       boss_key,
       boss_name,
@@ -194,8 +230,9 @@ function ensureTodayBossEvent() {
       created_at,
       updated_at
     )
-    VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)
   `).run(
+    guildKey,
     dateKey,
     boss.key,
     boss.name,
@@ -208,7 +245,12 @@ function ensureTodayBossEvent() {
     now
   );
 
-  return advancePendingBossState(getBossEventByDate(dateKey).id);
+  const created = getBossEventByDate(guildKey, dateKey);
+  return created ? advancePendingBossState(created.id) : null;
+}
+
+function getTodayBossEvent(guildKey) {
+  return ensureTodayBossEvent(guildKey);
 }
 
 function getTodayBossEvent() {
@@ -374,14 +416,26 @@ function getBusyInfo(player) {
 }
 
 function getBossDisplayState(player) {
-  const event = ensureTodayBossEvent();
-  const participation = player ? getEventParticipantByPlayer(event.id, player.id) : null;
+  if (!player?.guild_key) {
+    return null;
+  }
+
+  const event = ensureTodayBossEvent(player.guild_key);
+  if (!event) {
+    return null;
+  }
+
+  const participation = getEventParticipantByPlayer(event.id, player.id);
   const busy = getBusyInfo(player);
   const nowMs = Date.now();
   const spawnMs = new Date(event.spawn_at).getTime();
   const resolveMs = new Date(event.resolve_at).getTime();
-  const isFundingOpen = [BOSS_STATUS_FUNDING, BOSS_STATUS_READY].includes(event.status) && nowMs < spawnMs;
-  const isActive = event.status === BOSS_STATUS_ACTIVE && nowMs < resolveMs;
+  const isFundingOpen =
+    [BOSS_STATUS_FUNDING, BOSS_STATUS_READY].includes(event.status) &&
+    nowMs < spawnMs;
+  const isActive =
+    event.status === BOSS_STATUS_ACTIVE &&
+    nowMs < resolveMs;
 
   let donateBlockedReason = null;
   if (!player) {
@@ -658,40 +712,27 @@ function formatRewardSummary(rewards = {}) {
     .join(', ');
 }
 
-async function broadcastBossMessage(client, payload) {
-  if (!client) return;
+async function sendBossMessageToGuild(client, guildKey, payload) {
+  if (!client || !guildKey) return;
 
-  const channelIds = new Set();
-  for (const guild of guilds) {
-    const channelId = getGuildChatChannelId(guild.key);
-    if (channelId) {
-      channelIds.add(channelId);
-    }
-  }
+  const channelId = getGuildChatChannelId(guildKey);
+  if (!channelId) return;
 
-  for (const channelId of channelIds) {
-    const channel = await fetchTextChannel(client, channelId).catch(() => null);
-    if (!channel) continue;
-    await channel.send(payload).catch(() => null);
-  }
+  const channel = await fetchTextChannel(client, channelId).catch(() => null);
+  if (!channel) return;
+
+  await channel.send(payload).catch(() => null);
 }
 
-async function syncAllCampStatusMessages(client) {
-  if (!client) return;
-
-  for (const guild of guilds) {
-    await syncCampStatusMessage(client, guild.key).catch(() => null);
-  }
-}
 
 async function announceSpawnIfNeeded(client, event) {
   if (!client || !event || event.status !== BOSS_STATUS_ACTIVE || event.announced_spawn_at) {
     return event;
   }
 
-  await broadcastBossMessage(client, {
+  await sendBossMessageToGuild(client, event.guild_key, {
     content:
-      `${event.boss.emoji || '👾'} **Boss-Alarm!** ${event.bossName} ist erschienen!\n` +
+      `${event.boss.emoji || '👾'} **Boss-Alarm!** ${event.bossName} ist in **${event.guild_key}** erschienen!\n` +
       `${event.boss.intro || ''}\n` +
       `Der Kampf läuft bis **21:00 Uhr**. Öffnet das Aktionsmenü und wählt **Bossjagd**.`
   });
@@ -773,7 +814,7 @@ async function resolveBossEvent(client, eventId) {
       .join('\n')
     : 'Niemand hat teilgenommen.';
 
-  await broadcastBossMessage(client, {
+   await sendBossMessageToGuild(client, resolvedEvent.guild_key, {
     content:
       `${outcome.success ? '🏆' : '💀'} **Boss-Ergebnis:** ${resolvedEvent.bossName}\n` +
       `Teilnehmer: **${outcome.participantCount}** | Teamstärke: **${outcome.teamPower}** | Siegchance: **${Math.round(outcome.successChance * 100)}%**\n` +
@@ -781,33 +822,57 @@ async function resolveBossEvent(client, eventId) {
       `**Belohnungen**\n${rewardLines}`
   });
 
-  await syncAllCampStatusMessages(client);
+  await syncCampStatusMessage(client, resolvedEvent.guild_key).catch(() => null);
   return resolvedEvent;
 }
 
 async function processBossSchedulerTick(client) {
-  const event = ensureTodayBossEvent();
-  if (!event) return null;
+  const results = [];
 
-  const current = advancePendingBossState(event.id);
-  if (!current) return null;
-
-  if (current.status === BOSS_STATUS_ACTIVE) {
-    const announced = await announceSpawnIfNeeded(client, current);
-    const resolveMs = new Date(announced.resolve_at).getTime();
-
-    if (!Number.isNaN(resolveMs) && Date.now() >= resolveMs) {
-      return resolveBossEvent(client, announced.id);
+  for (const guild of guilds) {
+    if (!isBossUnlockedForGuild(guild.key)) {
+      continue;
     }
 
-    return announced;
+    const event = ensureTodayBossEvent(guild.key);
+    if (!event) {
+      continue;
+    }
+
+    const current = advancePendingBossState(event.id);
+    if (!current) {
+      continue;
+    }
+
+    if (current.status === BOSS_STATUS_ACTIVE) {
+      const announced = await announceSpawnIfNeeded(client, current);
+      const resolveMs = new Date(announced.resolve_at).getTime();
+
+      if (!Number.isNaN(resolveMs) && Date.now() >= resolveMs) {
+        const resolved = await resolveBossEvent(client, announced.id);
+        if (resolved) {
+          results.push(resolved);
+        }
+        continue;
+      }
+
+      results.push(announced);
+      continue;
+    }
+
+    if (
+      (current.status === BOSS_STATUS_FUNDING || current.status === BOSS_STATUS_READY) &&
+      current.foodInvested >= current.foodTarget
+    ) {
+      const readyEvent = updateBossEvent(current.id, { status: BOSS_STATUS_READY });
+      results.push(readyEvent);
+      continue;
+    }
+
+    results.push(current);
   }
 
-  if ((current.status === BOSS_STATUS_FUNDING || current.status === BOSS_STATUS_READY) && current.foodInvested >= current.foodTarget) {
-    return updateBossEvent(current.id, { status: BOSS_STATUS_READY });
-  }
-
-  return current;
+  return results;
 }
 
 module.exports = {
