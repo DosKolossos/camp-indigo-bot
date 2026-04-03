@@ -22,6 +22,13 @@ const {
 const { applyProgressWithLevelUpAnnouncement } = require('../services/levelUpService');
 const { syncCampStatusMessage } = require('../services/campStatusService');
 const {
+  BOSS_FOOD_TARGET,
+  getBossDisplayState,
+  donateFoodToBoss,
+  joinBossEvent,
+  formatRewardSummary
+} = require('../services/bossService');
+const {
   getXpProgress,
   getCampProgress,
   calculateScaledStats
@@ -58,6 +65,7 @@ const ERKUNDEN_UNLOCK_CAMP_LEVEL = 3;
 const SCHMIEDE_UNLOCK_CAMP_LEVEL = 4;
 const EXPEDITION_UNLOCK_CAMP_LEVEL = 4;
 const MARKET_UNLOCK_CAMP_LEVEL = 4;
+const BOSS_UNLOCK_CAMP_LEVEL = 5;
 
 const ERKUNDEN_BUSY_MS = 60 * 60 * 1000;
 const EXPEDITION_BUSY_MS = parseDurationMs(
@@ -408,6 +416,8 @@ function getBusyActivityLabel(activityKey) {
       return 'Erkundung';
     case 'expedition':
       return 'Expedition';
+    case 'boss':
+      return 'Bosskampf';
     default:
       return 'einer Aktion';
   }
@@ -501,6 +511,10 @@ function getNextUnlockHint(campLevel) {
     return `🔒 Nächste Freischaltung: **Markt** ab Camp-Stufe ${MARKET_UNLOCK_CAMP_LEVEL}`;
   }
 
+  if (campLevel < BOSS_UNLOCK_CAMP_LEVEL) {
+    return `🔒 Nächste Freischaltung: **Bossjagd** ab Camp-Stufe ${BOSS_UNLOCK_CAMP_LEVEL}`;
+  }
+
   return '✨ Alle aktuell eingebauten Camp-Aktionen sind freigeschaltet.';
 }
 
@@ -511,7 +525,9 @@ function buildActionOptions({
   erkundenUnlocked,
   forgeUnlocked,
   expeditionUnlocked,
-  marketUnlocked
+  marketUnlocked,
+  bossUnlocked,
+  bossState
 }) {
   const options = [
     {
@@ -665,6 +681,217 @@ function buildCooldownPayload(actionLabel, remainingMs) {
     description: `**${actionLabel}** ist noch auf Cooldown.\n\nBitte warte noch **${formatRemaining(remainingMs)}**.`,
     color: 0xe67e22
   });
+}
+
+function formatShortTime(dateLike) {
+  if (!dateLike) return '–';
+
+  const date = new Date(dateLike);
+  if (Number.isNaN(date.getTime())) return '–';
+
+  return new Intl.DateTimeFormat('de-DE', {
+    hour: '2-digit',
+    minute: '2-digit',
+    timeZone: 'Europe/Berlin'
+  }).format(date);
+}
+
+function buildBossBackRow() {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId('camp:boss:refresh')
+      .setLabel('Bossansicht aktualisieren')
+      .setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder()
+      .setCustomId('camp:actions:back')
+      .setLabel('Zurück zum Aktionsmenü')
+      .setStyle(ButtonStyle.Secondary)
+  );
+}
+
+function buildBossPayload(player) {
+  const camp = getCampState().progress;
+
+  if (camp.level < BOSS_UNLOCK_CAMP_LEVEL) {
+    return buildLockedPayload(
+      '🔒 Bossjagd noch nicht freigeschaltet',
+      `Die Bossjagd wird erst ab **Camp-Stufe ${BOSS_UNLOCK_CAMP_LEVEL}** verfügbar.\n\nAktuell ist euer Camp auf **Stufe ${camp.level}**.`
+    );
+  }
+
+  const bossState = getBossDisplayState(player);
+  const { event, boss, participation, busy } = bossState;
+  const rewardSummary = Array.isArray(event.rewardSummary?.rewards)
+    ? event.rewardSummary.rewards.slice(0, 6).map(entry => {
+        const summary = formatRewardSummary(entry.rewards || {});
+        return `• **${entry.username}**: ${summary || 'kein zusätzlicher Loot'}`;
+      }).join('\n')
+    : null;
+
+  let description =
+    `${boss.emoji || '👾'} **Tagesboss:** ${boss.name}\n` +
+    `**Status:** ${event.statusLabel}\n` +
+    `**Boss-Stärke:** ${event.bossPower}\n` +
+    `**Nahrung investiert:** ${event.foodInvested}/${event.foodTarget}\n` +
+    `**Teilnehmer:** ${event.participantCount}\n` +
+    `**Teamstärke:** ${event.teamPower}\n\n`;
+
+  if (bossState.isFundingOpen) {
+    description +=
+      `Investiere Nahrung, um den Boss für **20:00 Uhr** anzulocken.\n` +
+      `Noch benötigt: **${event.foodRemaining} Nahrung**.\n` +
+      `Deine Nahrung: **${player.food || 0}**`;
+
+    if (participation?.donated_food) {
+      description += `\nDein Beitrag heute: **${participation.donated_food} Nahrung**`;
+    }
+  } else if (event.status === 'ready') {
+    description +=
+      `${boss.intro || 'Der Boss wurde bereits angelockt.'}\n` +
+      `Spawn: **${formatShortTime(event.spawn_at)} Uhr**`;
+  } else if (bossState.isActive) {
+    description +=
+      `${boss.intro || 'Der Bosskampf läuft.'}\n` +
+      `Ende des Kampfes: **${formatShortTime(event.resolve_at)} Uhr**`;
+
+    if (participation?.joined_at) {
+      description += `\n\n✅ Du nimmst bereits am Bosskampf teil.`;
+    } else if (busy.isBusy) {
+      description += `\n\n🚫 Du bist aktuell auf **${getBusyActivityLabel(busy.activityKey)}** und kannst daher nicht teilnehmen.`;
+    }
+  } else if (event.status === 'won' || event.status === 'lost') {
+    description +=
+      `**Siegchance:** ${event.successChance == null ? '–' : `${Math.round(event.successChance * 100)}%`}\n` +
+      `**Wurf:** ${event.successRoll == null ? '–' : `${event.successRoll}/100`}\n\n` +
+      `${event.status === 'won' ? '🏆 Das Camp hat den Boss besiegt.' : '💀 Der Boss war zu stark.'}`;
+
+    if (rewardSummary) {
+      description += `\n\n**Belohnungen**\n${rewardSummary}`;
+    }
+  } else if (event.status === 'missed') {
+    description += 'Bis 20:00 Uhr wurde nicht genug Nahrung investiert. Morgen gibt es eine neue Chance.';
+  }
+
+  const components = [];
+
+  if (bossState.isFundingOpen) {
+    components.push(
+      new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+          .setCustomId('camp:boss:donate:1')
+          .setLabel('+1 Nahrung')
+          .setStyle(ButtonStyle.Success)
+          .setDisabled(!bossState.canDonate),
+        new ButtonBuilder()
+          .setCustomId('camp:boss:donate:5')
+          .setLabel('+5 Nahrung')
+          .setStyle(ButtonStyle.Primary)
+          .setDisabled(!bossState.canDonate)
+      )
+    );
+  }
+
+  if (event.status === 'ready' || bossState.isActive) {
+    components.push(
+      new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+          .setCustomId('camp:boss:join')
+          .setLabel(participation?.joined_at ? 'Bereits beigetreten' : 'Dem Bosskampf beitreten')
+          .setStyle(ButtonStyle.Danger)
+          .setDisabled(!bossState.canJoin)
+      )
+    );
+  }
+
+  components.push(buildBossBackRow());
+
+  return {
+    content: '',
+    embeds: [
+      new EmbedBuilder()
+        .setTitle('👾 Bossjagd')
+        .setDescription(description)
+        .setColor(event.status === 'won' ? 0x27ae60 : event.status === 'lost' ? 0xe74c3c : 0x8e44ad)
+    ],
+    components
+  };
+}
+
+async function runBossDonate(player, interaction, requestedAmount) {
+  const camp = getCampState().progress;
+  if (camp.level < BOSS_UNLOCK_CAMP_LEVEL) {
+    return buildLockedPayload(
+      '🔒 Bossjagd noch nicht freigeschaltet',
+      `Die Bossjagd wird erst ab **Camp-Stufe ${BOSS_UNLOCK_CAMP_LEVEL}** verfügbar.`
+    );
+  }
+
+  try {
+    const result = donateFoodToBoss({
+      discordUserId: player.discord_user_id,
+      amount: requestedAmount
+    });
+
+    await syncCampStatusMessage(interaction.client, player.guild_key).catch(() => null);
+
+    return {
+      content: '',
+      embeds: [
+        new EmbedBuilder()
+          .setTitle('🍖 Nahrung investiert')
+          .setDescription(
+            `Du hast **${result.appliedAmount} Nahrung** in die Bossjagd investiert.\n\n` +
+            `Fortschritt: **${result.display.event.foodInvested}/${result.display.event.foodTarget}**\n` +
+            `Noch benötigt: **${result.display.event.foodRemaining} Nahrung**`
+          )
+          .setColor(0x27ae60)
+      ],
+      components: buildBossPayload(result.player).components
+    };
+  } catch (error) {
+    return buildActionResultPayload({
+      title: '❌ Investition fehlgeschlagen',
+      description: String(error.message || error),
+      color: 0xe74c3c
+    });
+  }
+}
+
+async function runBossJoin(player) {
+  const camp = getCampState().progress;
+  if (camp.level < BOSS_UNLOCK_CAMP_LEVEL) {
+    return buildLockedPayload(
+      '🔒 Bossjagd noch nicht freigeschaltet',
+      `Die Bossjagd wird erst ab **Camp-Stufe ${BOSS_UNLOCK_CAMP_LEVEL}** verfügbar.`
+    );
+  }
+
+  try {
+    const result = joinBossEvent({
+      discordUserId: player.discord_user_id
+    });
+
+    return {
+      content: '',
+      embeds: [
+        new EmbedBuilder()
+          .setTitle('⚔️ Bosskampf beigetreten')
+          .setDescription(
+            `Du stellst dich **${result.display.boss.name}** entgegen.\n\n` +
+            `Deine Kampfkraft für diesen Kampf: **${result.participantPower}**\n` +
+            `Bis zur Auflösung um **${formatShortTime(result.display.event.resolve_at)} Uhr** bist du für andere Expeditionen blockiert.`
+          )
+          .setColor(0xc0392b)
+      ],
+      components: buildBossPayload(result.player).components
+    };
+  } catch (error) {
+    return buildActionResultPayload({
+      title: '❌ Teilnahme fehlgeschlagen',
+      description: String(error.message || error),
+      color: 0xe74c3c
+    });
+  }
 }
 
 function getEquipmentTierName(fieldName, tier) {
@@ -1110,6 +1337,8 @@ function buildActionMenu(player) {
   const forgeUnlocked = camp.level >= SCHMIEDE_UNLOCK_CAMP_LEVEL;
   const expeditionUnlocked = camp.level >= EXPEDITION_UNLOCK_CAMP_LEVEL;
   const marketUnlocked = camp.level >= MARKET_UNLOCK_CAMP_LEVEL;
+  const bossUnlocked = camp.level >= BOSS_UNLOCK_CAMP_LEVEL;
+  const bossState = bossUnlocked ? getBossDisplayState(player) : null;
 
   const nextUnlockHint = getNextUnlockHint(camp.level);
 
@@ -1128,6 +1357,22 @@ function buildActionMenu(player) {
     statusLines.push(`⚔️ Kampfkraft: ${getPlayerCombatPower(player)} | 🔎 Beutebonus: +${getPlayerLootBonus(player)}%`);
   }
 
+  if (bossUnlocked && bossState) {
+    const bossLine = bossState.isActive
+      ? `👾 Boss aktiv: ${bossState.boss.name} bis ${formatShortTime(bossState.event.resolve_at)} Uhr (${bossState.event.participantCount} Teilnehmer)`
+      : bossState.event.status === 'ready'
+        ? `👾 Boss angelockt: ${bossState.boss.name} spawnt um ${formatShortTime(bossState.event.spawn_at)} Uhr`
+        : bossState.event.status === 'won'
+          ? `👾 Boss besiegt: ${bossState.boss.name}`
+          : bossState.event.status === 'lost'
+            ? `👾 Boss verloren: ${bossState.boss.name}`
+            : bossState.event.status === 'missed'
+              ? '👾 Heute wurde kein Boss angelockt'
+              : `👾 Bossjagd: ${bossState.event.foodInvested}/${bossState.event.foodTarget} Nahrung investiert`;
+
+    statusLines.push(bossLine);
+  }
+
   const actionOptions = buildActionOptions({
     busy,
     cooldowns,
@@ -1135,7 +1380,9 @@ function buildActionMenu(player) {
     erkundenUnlocked,
     forgeUnlocked,
     expeditionUnlocked,
-    marketUnlocked
+    marketUnlocked,
+    bossUnlocked,
+    bossState
   });
 
   const embed = new EmbedBuilder()
@@ -1579,7 +1826,8 @@ function buildLagerPayload() {
           `Stufe 1: Sammeln, Arbeiten\n` +
           `Stufe 2: Trainieren\n` +
           `Stufe 3: Erkunden\n` +
-          `Stufe 4: Schmiede, Expedition, Markt`
+          `Stufe 4: Schmiede, Expedition, Markt\n` +
+          `Stufe 5: Bossjagd`
         )
         .setColor(0xf1c40f)
     ],
@@ -1603,6 +1851,9 @@ module.exports = {
         interaction.customId === 'camp:actions:open' ||
         interaction.customId === 'camp:actions:back' ||
         interaction.customId === 'camp:market:back' ||
+        interaction.customId === 'camp:boss:refresh' ||
+        interaction.customId === 'camp:boss:join' ||
+        interaction.customId.startsWith('camp:boss:donate:') ||
         interaction.customId === 'camp:market:listings' ||
         interaction.customId === 'camp:market:sellitem' ||
         interaction.customId === 'camp:market:mylistings' ||
@@ -1651,6 +1902,49 @@ module.exports = {
       }
 
       await interaction.editReply(buildActionMenu(player)).catch(() => null);
+      return true;
+    }
+
+    if (interaction.isButton() && interaction.customId === 'camp:boss:refresh') {
+      const ok = await safeDeferUpdate(interaction);
+      if (!ok) return false;
+
+      const player = getPlayerByDiscordUserId(interaction.user.id);
+      if (!player) {
+        await interaction.editReply(getMissingPlayerPayload()).catch(() => null);
+        return true;
+      }
+
+      await interaction.editReply(buildBossPayload(player)).catch(() => null);
+      return true;
+    }
+
+    if (interaction.isButton() && interaction.customId.startsWith('camp:boss:donate:')) {
+      const ok = await safeDeferUpdate(interaction);
+      if (!ok) return false;
+
+      const player = getPlayerByDiscordUserId(interaction.user.id);
+      if (!player) {
+        await interaction.editReply(getMissingPlayerPayload()).catch(() => null);
+        return true;
+      }
+
+      const amount = Number(interaction.customId.split(':').pop()) || 1;
+      await interaction.editReply(await runBossDonate(player, interaction, amount)).catch(() => null);
+      return true;
+    }
+
+    if (interaction.isButton() && interaction.customId === 'camp:boss:join') {
+      const ok = await safeDeferUpdate(interaction);
+      if (!ok) return false;
+
+      const player = getPlayerByDiscordUserId(interaction.user.id);
+      if (!player) {
+        await interaction.editReply(getMissingPlayerPayload()).catch(() => null);
+        return true;
+      }
+
+      await interaction.editReply(await runBossJoin(player)).catch(() => null);
       return true;
     }
 
@@ -2001,6 +2295,11 @@ module.exports = {
 
       if (value === 'markt') {
         await interaction.editReply(buildMarketPayload(player)).catch(() => null);
+        return true;
+      }
+
+      if (value === 'boss') {
+        await interaction.editReply(buildBossPayload(player)).catch(() => null);
         return true;
       }
 

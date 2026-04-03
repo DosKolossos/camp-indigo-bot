@@ -78,6 +78,47 @@ db.exec(`
     created_at TEXT NOT NULL
   );
 
+  CREATE TABLE IF NOT EXISTS boss_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_date TEXT NOT NULL UNIQUE,
+    boss_key TEXT NOT NULL,
+    boss_name TEXT NOT NULL,
+    boss_power INTEGER NOT NULL,
+    food_target INTEGER NOT NULL DEFAULT 10,
+    food_invested INTEGER NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'funding',
+    spawn_at TEXT NOT NULL,
+    resolve_at TEXT NOT NULL,
+    spawned_at TEXT,
+    resolved_at TEXT,
+    success_roll INTEGER,
+    success_chance REAL,
+    team_power INTEGER NOT NULL DEFAULT 0,
+    participant_count INTEGER NOT NULL DEFAULT 0,
+    announced_spawn_at TEXT,
+    announced_result_at TEXT,
+    reward_json TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS boss_event_players (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_id INTEGER NOT NULL,
+    player_id INTEGER NOT NULL,
+    discord_user_id TEXT NOT NULL,
+    donated_food INTEGER NOT NULL DEFAULT 0,
+    joined_at TEXT,
+    participant_power INTEGER NOT NULL DEFAULT 0,
+    reward_json TEXT,
+    result_status TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(event_id, player_id),
+    FOREIGN KEY(event_id) REFERENCES boss_events(id) ON DELETE CASCADE,
+    FOREIGN KEY(player_id) REFERENCES players(id) ON DELETE CASCADE
+  );
+
   CREATE TABLE IF NOT EXISTS player_items (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     player_id INTEGER NOT NULL,
@@ -107,6 +148,15 @@ db.exec(`
 
   CREATE INDEX IF NOT EXISTS idx_player_items_player_id
     ON player_items(player_id);
+
+  CREATE INDEX IF NOT EXISTS idx_boss_events_status_spawn_at
+    ON boss_events(status, spawn_at);
+
+  CREATE INDEX IF NOT EXISTS idx_boss_event_players_event_id
+    ON boss_event_players(event_id);
+
+  CREATE INDEX IF NOT EXISTS idx_boss_event_players_player_id
+    ON boss_event_players(player_id);
 
   CREATE INDEX IF NOT EXISTS idx_market_listings_status_created_at
     ON market_listings(status, created_at DESC);

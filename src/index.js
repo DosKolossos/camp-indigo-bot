@@ -16,6 +16,7 @@ const startFlow = require('./interactions/startFlow');
 const actionFlow = require('./interactions/actionFlow');
 const { startAdminServer } = require('./web/adminServer');
 const { sendBotLog } = require('./services/botLogService');
+const { processBossSchedulerTick } = require('./services/bossService');
 
 function envFlag(name, fallback = false) {
   const value = String(process.env[name] ?? fallback).toLowerCase().trim();
@@ -78,6 +79,8 @@ if (!ENABLE_DISCORD_BOT) {
     console.log('Slash-Commands registriert.');
   }
 
+  let bossTickTimer = null;
+
   client.once('clientReady', async () => {
     console.log(`Eingeloggt als ${client.user.tag}`);
     await registerCommands();
@@ -87,6 +90,22 @@ if (!ENABLE_DISCORD_BOT) {
       `Bot online als **${client.user.tag}**. Start-, Aktions- und Gildenkanäle sind aktiv.`,
       { level: 'info' }
     );
+
+    const runBossTick = async () => {
+      try {
+        await processBossSchedulerTick(client);
+      } catch (error) {
+        console.error('Boss-Scheduler Fehler:', error);
+      }
+    };
+
+    await runBossTick();
+
+    if (bossTickTimer) {
+      clearInterval(bossTickTimer);
+    }
+
+    bossTickTimer = setInterval(runBossTick, 30 * 1000);
   });
 
   client.on('interactionCreate', async interaction => {
