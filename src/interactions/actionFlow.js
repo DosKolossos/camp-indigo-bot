@@ -193,6 +193,10 @@ function buildStatsText(stats) {
   );
 }
 
+function randomInt(min, max) {
+  return Math.floor(Math.random() * (max - min + 1)) + min;
+}
+
 function buildBackRow() {
   return new ActionRowBuilder().addComponents(
     new ButtonBuilder()
