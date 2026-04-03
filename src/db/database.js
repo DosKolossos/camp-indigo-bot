@@ -35,6 +35,42 @@ function tableExists(tableName) {
   return Boolean(row);
 }
 
+function tableHasColumn(tableName, columnName) {
+  if (!tableExists(tableName)) {
+    return false;
+  }
+
+  const columns = db.prepare(`PRAGMA table_info(${tableName})`).all();
+  return columns.some(column => column.name === columnName);
+}
+
+function ensureGuildScopedBossTables() {
+  if (!tableExists('boss_events')) {
+    return;
+  }
+
+  if (tableHasColumn('boss_events', 'guild_key')) {
+    return;
+  }
+
+  console.log('[db] resetting legacy boss tables to guild-scoped schema');
+
+  db.exec(`
+    DROP TABLE IF EXISTS boss_event_players;
+    DROP TABLE IF EXISTS boss_events;
+  `);
+}
+
+function tableExists(tableName) {
+  const row = db.prepare(`
+    SELECT name
+    FROM sqlite_master
+    WHERE type = 'table' AND name = ?
+  `).get(tableName);
+
+  return Boolean(row);
+}
+
 function ensureGuildScopedBossTables() {
   if (!tableExists('boss_events')) {
     return;
@@ -94,6 +130,8 @@ db.exec(`
     updated_at TEXT NOT NULL
   );
 `);
+
+ensureGuildScopedBossTables();
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS player_activity_log (
