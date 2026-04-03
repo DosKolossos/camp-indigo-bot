@@ -146,6 +146,10 @@ function updatePlayerProgress(discordUserId, changes = {}) {
     values.push(changes.scanner_tier);
   }
 
+  if (!fields.length) {
+    return getPlayerByDiscordUserId(discordUserId);
+  }
+
   fields.push('updated_at = ?');
   values.push(new Date().toISOString());
   values.push(discordUserId);
@@ -156,234 +160,84 @@ function updatePlayerProgress(discordUserId, changes = {}) {
     WHERE discord_user_id = ?
   `).run(...values);
 
-  return refreshPlayerLevel(discordUserId);
-}
-
-function refreshPlayerLevel(discordUserId) {
   const player = getPlayerByDiscordUserId(discordUserId);
-  if (!player) return null;
+  const nextLevel = calculateLevelFromXp(player.xp);
 
-  const targetLevel = calculateLevelFromXp(player.xp);
-
-  if (targetLevel !== player.level) {
+  if (player.level !== nextLevel) {
     db.prepare(`
       UPDATE players
       SET level = ?, updated_at = ?
       WHERE discord_user_id = ?
-    `).run(targetLevel, new Date().toISOString(), discordUserId);
-
-    return getPlayerByDiscordUserId(discordUserId);
+    `).run(nextLevel, new Date().toISOString(), discordUserId);
   }
 
-  return player;
+  return getPlayerByDiscordUserId(discordUserId);
 }
 
-function getCampTotals(guildKey = null) {
-  const sql = `
+function getCampTotals() {
+  const row = db.prepare(`
     SELECT
-      COUNT(*) as players,
-      COALESCE(SUM(wood), 0) as wood,
-      COALESCE(SUM(food), 0) as food,
-      COALESCE(SUM(stone), 0) as stone,
-      COALESCE(SUM(contribution), 0) as contribution,
-      COALESCE(SUM(exploration_points), 0) as exploration_points,
-      COALESCE(SUM(food_credit), 0) as food_credit,
-      COALESCE(SUM(ore), 0) as ore,
-      COALESCE(SUM(fiber), 0) as fiber,
-      COALESCE(SUM(scrap), 0) as scrap,
-      COALESCE(SUM(xp), 0) as xp
+      COUNT(*) AS players,
+      SUM(xp) AS xp,
+      SUM(wood) AS wood,
+      SUM(food) AS food,
+      SUM(stone) AS stone,
+      SUM(contribution) AS contribution,
+      SUM(exploration_points) AS exploration_points,
+      SUM(ore) AS ore,
+      SUM(fiber) AS fiber,
+      SUM(scrap) AS scrap
     FROM players
-    ${guildKey ? 'WHERE guild_key = ?' : ''}
-  `;
+  `).get();
 
-  return guildKey ? db.prepare(sql).get(guildKey) : db.prepare(sql).get();
+  return {
+    players: Number(row?.players || 0),
+    xp: Number(row?.xp || 0),
+    wood: Number(row?.wood || 0),
+    food: Number(row?.food || 0),
+    stone: Number(row?.stone || 0),
+    contribution: Number(row?.contribution || 0),
+    exploration_points: Number(row?.exploration_points || 0),
+    ore: Number(row?.ore || 0),
+    fiber: Number(row?.fiber || 0),
+    scrap: Number(row?.scrap || 0)
+  };
 }
 
-function getCooldownField(actionKey) {
+function getActionCooldownField(actionKey) {
   return ACTION_COOLDOWN_FIELDS[actionKey] || null;
 }
 
-function setActionCooldown(discordUserId, actionKey, untilIso) {
-  const field = getCooldownField(actionKey);
-  if (!field) {
-    throw new Error(`Unbekannte Action für Cooldown: ${actionKey}`);
+function setActionCooldown(discordUserId, actionKey, untilIsoString = null) {
+  const fieldName = getActionCooldownField(actionKey);
+  if (!fieldName) {
+    throw new Error(`Unbekannter Cooldown-Key: ${actionKey}`);
   }
 
   db.prepare(`
     UPDATE players
-    SET ${field} = ?, updated_at = ?
+    SET ${fieldName} = ?, updated_at = ?
     WHERE discord_user_id = ?
-  `).run(untilIso, new Date().toISOString(), discordUserId);
+  `).run(untilIsoString, new Date().toISOString(), discordUserId);
 
   return getPlayerByDiscordUserId(discordUserId);
 }
 
-function resetPlayerCooldowns(discordUserId) {
+function setPlayerBusy(discordUserId, activityKey = null, untilIsoString = null) {
   db.prepare(`
     UPDATE players
-    SET sammeln_cooldown_until = NULL,
-        arbeiten_cooldown_until = NULL,
-        trainieren_cooldown_until = NULL,
-        expedition_cooldown_until = NULL,
-        updated_at = ?
+    SET busy_until = ?, busy_activity = ?, updated_at = ?
     WHERE discord_user_id = ?
-  `).run(new Date().toISOString(), discordUserId);
+  `).run(untilIsoString, activityKey, new Date().toISOString(), discordUserId);
 
   return getPlayerByDiscordUserId(discordUserId);
 }
 
-function setPlayerBusy(discordUserId, activityKey, busyUntil) {
-  db.prepare(`
-    UPDATE players
-    SET busy_until = ?, busy_activity = ?
-    WHERE discord_user_id = ?
-  `).run(busyUntil, activityKey, discordUserId);
-}
-
-function resetAllCooldowns() {
-  db.prepare(`
-    UPDATE players
-    SET sammeln_cooldown_until = NULL,
-        arbeiten_cooldown_until = NULL,
-        trainieren_cooldown_until = NULL,
-        expedition_cooldown_until = NULL,
-        updated_at = ?
-  `).run(new Date().toISOString());
-}
-
-function setBusyState(discordUserId, activityKey, untilIso) {
-  db.prepare(`
-    UPDATE players
-    SET busy_activity = ?,
-        busy_until = ?,
-        updated_at = ?
-    WHERE discord_user_id = ?
-  `).run(activityKey, untilIso, new Date().toISOString(), discordUserId);
-
-  return getPlayerByDiscordUserId(discordUserId);
-}
-
-function clearBusyState(discordUserId) {
-  db.prepare(`
-    UPDATE players
-    SET busy_activity = NULL,
-        busy_until = NULL,
-        updated_at = ?
-    WHERE discord_user_id = ?
-  `).run(new Date().toISOString(), discordUserId);
-
-  return getPlayerByDiscordUserId(discordUserId);
-}
-
-function normalizeNullableDate(value) {
-  if (!value) return null;
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return null;
-  return date.toISOString();
-}
-
-function updatePlayerAdmin(id, payload = {}) {
-  const currentPlayer = getPlayerById(id);
-  if (!currentPlayer) return null;
-
-  const nextPlayer = {
-    ...currentPlayer,
-    ...payload
-  };
-
-  nextPlayer.xp = Number.isFinite(Number(nextPlayer.xp))
-    ? Math.max(0, Number(nextPlayer.xp))
-    : currentPlayer.xp;
-
-  nextPlayer.level = calculateLevelFromXp(nextPlayer.xp);
-  nextPlayer.wood = Number.isFinite(Number(nextPlayer.wood)) ? Math.max(0, Number(nextPlayer.wood)) : currentPlayer.wood;
-  nextPlayer.food = Number.isFinite(Number(nextPlayer.food)) ? Math.max(0, Number(nextPlayer.food)) : currentPlayer.food;
-  nextPlayer.stone = Number.isFinite(Number(nextPlayer.stone)) ? Math.max(0, Number(nextPlayer.stone)) : currentPlayer.stone;
-  nextPlayer.contribution = Number.isFinite(Number(nextPlayer.contribution)) ? Math.max(0, Number(nextPlayer.contribution)) : currentPlayer.contribution;
-  nextPlayer.exploration_points = Number.isFinite(Number(nextPlayer.exploration_points))
-    ? Math.max(0, Number(nextPlayer.exploration_points))
-    : currentPlayer.exploration_points;
-  nextPlayer.food_credit = Number.isFinite(Number(nextPlayer.food_credit))
-    ? Math.max(0, Number(nextPlayer.food_credit))
-    : currentPlayer.food_credit;
-  nextPlayer.ore = Number.isFinite(Number(nextPlayer.ore)) ? Math.max(0, Number(nextPlayer.ore)) : currentPlayer.ore;
-  nextPlayer.fiber = Number.isFinite(Number(nextPlayer.fiber)) ? Math.max(0, Number(nextPlayer.fiber)) : currentPlayer.fiber;
-  nextPlayer.scrap = Number.isFinite(Number(nextPlayer.scrap)) ? Math.max(0, Number(nextPlayer.scrap)) : currentPlayer.scrap;
-  nextPlayer.weapon_tier = Number.isFinite(Number(nextPlayer.weapon_tier)) ? Math.max(0, Number(nextPlayer.weapon_tier)) : currentPlayer.weapon_tier;
-  nextPlayer.armor_tier = Number.isFinite(Number(nextPlayer.armor_tier)) ? Math.max(0, Number(nextPlayer.armor_tier)) : currentPlayer.armor_tier;
-  nextPlayer.scanner_tier = Number.isFinite(Number(nextPlayer.scanner_tier)) ? Math.max(0, Number(nextPlayer.scanner_tier)) : currentPlayer.scanner_tier;
-
-  const now = new Date().toISOString();
-
-  db.prepare(`
-    UPDATE players
-    SET discord_username = ?,
-        pokemon_key = ?,
-        guild_key = ?,
-        level = ?,
-        xp = ?,
-        wood = ?,
-        food = ?,
-        stone = ?,
-        contribution = ?,
-        exploration_points = ?,
-        food_credit = ?,
-        ore = ?,
-        fiber = ?,
-        scrap = ?,
-        weapon_tier = ?,
-        armor_tier = ?,
-        scanner_tier = ?,
-        sammeln_cooldown_until = ?,
-        arbeiten_cooldown_until = ?,
-        trainieren_cooldown_until = ?,
-        expedition_cooldown_until = ?,
-        busy_until = ?,
-        busy_activity = ?,
-        updated_at = ?
-    WHERE id = ?
-  `).run(
-    String(nextPlayer.discord_username || currentPlayer.discord_username),
-    String(nextPlayer.pokemon_key || currentPlayer.pokemon_key),
-    String(nextPlayer.guild_key || currentPlayer.guild_key),
-    nextPlayer.level,
-    nextPlayer.xp,
-    nextPlayer.wood,
-    nextPlayer.food,
-    nextPlayer.stone,
-    nextPlayer.contribution,
-    nextPlayer.exploration_points,
-    nextPlayer.food_credit,
-    nextPlayer.ore,
-    nextPlayer.fiber,
-    nextPlayer.scrap,
-    nextPlayer.weapon_tier,
-    nextPlayer.armor_tier,
-    nextPlayer.scanner_tier,
-    normalizeNullableDate(nextPlayer.sammeln_cooldown_until),
-    normalizeNullableDate(nextPlayer.arbeiten_cooldown_until),
-    normalizeNullableDate(nextPlayer.trainieren_cooldown_until),
-    normalizeNullableDate(nextPlayer.expedition_cooldown_until),
-    normalizeNullableDate(nextPlayer.busy_until),
-    nextPlayer.busy_activity || null,
-    now,
-    id
-  );
-
-  return getPlayerById(id);
-}
-
-function deletePlayerById(id) {
-  return db.prepare(`DELETE FROM players WHERE id = ?`).run(id);
-}
-
-function deleteAllPlayers() {
-  return db.prepare(`DELETE FROM players`).run();
+function clearPlayerBusy(discordUserId) {
+  return setPlayerBusy(discordUserId, null, null);
 }
 
 function logPlayerActivity(discordUserId, actionKey, changes = {}) {
-  const now = new Date().toISOString();
-
   db.prepare(`
     INSERT INTO player_activity_log (
       discord_user_id,
@@ -400,51 +254,148 @@ function logPlayerActivity(discordUserId, actionKey, changes = {}) {
   `).run(
     discordUserId,
     actionKey || null,
-    Number(changes.contribution) || 0,
-    Number(changes.exploration_points) || 0,
-    Number(changes.xp) || 0,
-    Number(changes.wood) || 0,
-    Number(changes.food) || 0,
-    Number(changes.stone) || 0,
-    now
+    Number(changes.contribution || 0),
+    Number(changes.exploration_points || 0),
+    Number(changes.xp || 0),
+    Number(changes.wood || 0),
+    Number(changes.food || 0),
+    Number(changes.stone || 0),
+    new Date().toISOString()
   );
 }
 
-function getTopContributorLast24Hours(guildKey = null) {
-  const since = new Date(Date.now() - (24 * 60 * 60 * 1000)).toISOString();
-
-  const sql = `
-    SELECT
-      p.discord_user_id,
-      p.discord_username,
-      p.guild_key,
-      p.pokemon_key,
-      COALESCE(SUM(l.contribution_delta), 0) as contribution_24h,
-      COALESCE(SUM(l.xp_delta), 0) as xp_24h
-    FROM player_activity_log l
-    JOIN players p
-      ON p.discord_user_id = l.discord_user_id
-    WHERE l.created_at >= ?
-      ${guildKey ? 'AND p.guild_key = ?' : ''}
-    GROUP BY p.discord_user_id, p.discord_username, p.guild_key, p.pokemon_key
-    HAVING contribution_24h > 0 OR xp_24h > 0
-    ORDER BY contribution_24h DESC, xp_24h DESC, p.discord_username ASC
-    LIMIT 1
-  `;
-
-  return guildKey
-    ? db.prepare(sql).get(since, guildKey)
-    : db.prepare(sql).get(since);
-}
-
-function resetCampToStage3() {
+function resetPlayerCooldowns(discordUserId) {
   db.prepare(`
     UPDATE players
-    SET exploration_points = 0,
-        busy_until = NULL,
+    SET sammeln_cooldown_until = NULL,
+        arbeiten_cooldown_until = NULL,
+        trainieren_cooldown_until = NULL,
+        expedition_cooldown_until = NULL,
+        updated_at = ?
+    WHERE discord_user_id = ?
+  `).run(new Date().toISOString(), discordUserId);
+
+  return getPlayerByDiscordUserId(discordUserId);
+}
+
+function resetPlayerBusy(discordUserId) {
+  return setPlayerBusy(discordUserId, null, null);
+}
+
+function resetPlayerActionState(discordUserId) {
+  resetPlayerCooldowns(discordUserId);
+  resetPlayerBusy(discordUserId);
+  return getPlayerByDiscordUserId(discordUserId);
+}
+
+function resetAllCooldowns() {
+  db.prepare(`
+    UPDATE players
+    SET sammeln_cooldown_until = NULL,
+        arbeiten_cooldown_until = NULL,
+        trainieren_cooldown_until = NULL,
+        expedition_cooldown_until = NULL,
+        updated_at = ?
+  `).run(new Date().toISOString());
+}
+
+function resetAllBusy() {
+  db.prepare(`
+    UPDATE players
+    SET busy_until = NULL,
         busy_activity = NULL,
         updated_at = ?
   `).run(new Date().toISOString());
+}
+
+function resetAllActionState() {
+  resetAllCooldowns();
+  resetAllBusy();
+}
+
+function getLatestActivities(limit = 20) {
+  return db.prepare(`
+    SELECT *
+    FROM player_activity_log
+    ORDER BY created_at DESC
+    LIMIT ?
+  `).all(limit);
+}
+
+function normalizeNullableDate(value) {
+  if (!value) return null;
+  const timestamp = new Date(value).getTime();
+  if (Number.isNaN(timestamp)) return null;
+  return new Date(timestamp).toISOString();
+}
+
+function setPlayerStateById(playerId, nextPlayer = {}) {
+  const player = getPlayerById(playerId);
+  if (!player) {
+    throw new Error('Spieler nicht gefunden.');
+  }
+
+  const now = new Date().toISOString();
+
+  db.prepare(`
+    UPDATE players
+    SET
+      discord_username = ?,
+      pokemon_key = ?,
+      guild_key = ?,
+      guild_role_id = ?,
+      level = ?,
+      xp = ?,
+      wood = ?,
+      food = ?,
+      stone = ?,
+      contribution = ?,
+      exploration_points = ?,
+      food_credit = ?,
+      ore = ?,
+      fiber = ?,
+      scrap = ?,
+      weapon_tier = ?,
+      armor_tier = ?,
+      scanner_tier = ?,
+      sammeln_cooldown_until = ?,
+      arbeiten_cooldown_until = ?,
+      trainieren_cooldown_until = ?,
+      expedition_cooldown_until = ?,
+      busy_until = ?,
+      busy_activity = ?,
+      updated_at = ?
+    WHERE id = ?
+  `).run(
+    String(nextPlayer.discord_username ?? player.discord_username),
+    String(nextPlayer.pokemon_key ?? player.pokemon_key),
+    String(nextPlayer.guild_key ?? player.guild_key),
+    nextPlayer.guild_role_id ?? player.guild_role_id ?? null,
+    Math.max(1, Number(nextPlayer.level ?? player.level) || 1),
+    Math.max(0, Number(nextPlayer.xp ?? player.xp) || 0),
+    Math.max(0, Number(nextPlayer.wood ?? player.wood) || 0),
+    Math.max(0, Number(nextPlayer.food ?? player.food) || 0),
+    Math.max(0, Number(nextPlayer.stone ?? player.stone) || 0),
+    Math.max(0, Number(nextPlayer.contribution ?? player.contribution) || 0),
+    Math.max(0, Number(nextPlayer.exploration_points ?? player.exploration_points) || 0),
+    Math.max(0, Number(nextPlayer.food_credit ?? player.food_credit) || 0),
+    Math.max(0, Number(nextPlayer.ore ?? player.ore) || 0),
+    Math.max(0, Number(nextPlayer.fiber ?? player.fiber) || 0),
+    Math.max(0, Number(nextPlayer.scrap ?? player.scrap) || 0),
+    Math.max(0, Number(nextPlayer.weapon_tier ?? player.weapon_tier) || 0),
+    Math.max(0, Number(nextPlayer.armor_tier ?? player.armor_tier) || 0),
+    Math.max(0, Number(nextPlayer.scanner_tier ?? player.scanner_tier) || 0),
+    normalizeNullableDate(nextPlayer.sammeln_cooldown_until),
+    normalizeNullableDate(nextPlayer.arbeiten_cooldown_until),
+    normalizeNullableDate(nextPlayer.trainieren_cooldown_until),
+    normalizeNullableDate(nextPlayer.expedition_cooldown_until),
+    normalizeNullableDate(nextPlayer.busy_until),
+    nextPlayer.busy_activity || null,
+    now,
+    playerId
+  );
+
+  return getPlayerById(playerId);
 }
 
 module.exports = {
@@ -454,18 +405,18 @@ module.exports = {
   createPlayer,
   allPlayers,
   updatePlayerProgress,
-  refreshPlayerLevel,
   getCampTotals,
+  getActionCooldownField,
   setActionCooldown,
-  resetPlayerCooldowns,
-  resetAllCooldowns,
-  updatePlayerAdmin,
-  deletePlayerById,
-  deleteAllPlayers,
-  setBusyState,
-  clearBusyState,
-  logPlayerActivity,
-  getTopContributorLast24Hours,
   setPlayerBusy,
-  resetCampToStage3
+  clearPlayerBusy,
+  logPlayerActivity,
+  resetPlayerCooldowns,
+  resetPlayerBusy,
+  resetPlayerActionState,
+  resetAllCooldowns,
+  resetAllBusy,
+  resetAllActionState,
+  getLatestActivities,
+  setPlayerStateById
 };

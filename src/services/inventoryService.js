@@ -170,7 +170,9 @@ const useInventoryItem = db.transaction(({ playerId, itemKey }) => {
   }
 
   if (currentTier !== item.targetTier - 1) {
-    throw new Error(`Du kannst ${item.label} erst nutzen, wenn deine ${EQUIPMENT_LABELS[item.targetField] || item.targetField} auf Stufe ${item.targetTier - 1} ist.`);
+    throw new Error(
+      `Du kannst ${item.label} erst nutzen, wenn deine ${EQUIPMENT_LABELS[item.targetField] || item.targetField} auf Stufe ${item.targetTier - 1} ist.`
+    );
   }
 
   removePlayerItem(playerId, itemKey, 1);

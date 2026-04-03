@@ -115,11 +115,11 @@ function getListingById(listingId) {
     SELECT
       ml.id,
       ml.seller_player_id,
+      ml.buyer_player_id,
       ml.item_key,
       ml.quantity,
       ml.price_json,
       ml.status,
-      ml.buyer_player_id,
       ml.created_at,
       ml.updated_at,
       ml.sold_at,
@@ -216,13 +216,18 @@ const purchaseListing = db.transaction(({ listingId, buyerPlayerId }) => {
     throw new Error('Dir fehlen Ressourcen für diesen Kauf.');
   }
 
-  const buyerDelta = Object.fromEntries(RESOURCE_KEYS.map(key => [key, -(Number(listing.price?.[key]) || 0)]));
-  const sellerDelta = Object.fromEntries(RESOURCE_KEYS.map(key => [key, Number(listing.price?.[key]) || 0]));
+  const buyerDelta = Object.fromEntries(
+    RESOURCE_KEYS.map(key => [key, -(Number(listing.price?.[key]) || 0)])
+  );
+
+  const sellerDelta = Object.fromEntries(
+    RESOURCE_KEYS.map(key => [key, Number(listing.price?.[key]) || 0])
+  );
 
   applyResourceDeltaToPlayer(buyerPlayerId, buyerDelta);
   applyResourceDeltaToPlayer(listing.seller_player_id, sellerDelta);
   addPlayerItem(buyerPlayerId, listing.item_key, listing.quantity);
-
+  
   const now = new Date().toISOString();
   db.prepare(`
     UPDATE market_listings

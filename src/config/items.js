@@ -31,6 +31,7 @@ const ITEM_DEFINITIONS = {
     targetTier: 3,
     recipe: CRAFTING_RECIPES.weapon_tier[3]
   },
+
   armor_kit_t1: {
     key: 'armor_kit_t1',
     label: 'Rüstungs-Kit T1',
@@ -61,6 +62,7 @@ const ITEM_DEFINITIONS = {
     targetTier: 3,
     recipe: CRAFTING_RECIPES.armor_tier[3]
   },
+
   scanner_kit_t1: {
     key: 'scanner_kit_t1',
     label: 'Scanner-Kit T1',

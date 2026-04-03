@@ -77,6 +77,42 @@ db.exec(`
     stone_delta INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL
   );
+
+  CREATE TABLE IF NOT EXISTS player_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    player_id INTEGER NOT NULL,
+    item_key TEXT NOT NULL,
+    quantity INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(player_id, item_key),
+    FOREIGN KEY(player_id) REFERENCES players(id) ON DELETE CASCADE
+  );
+
+  CREATE TABLE IF NOT EXISTS market_listings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    seller_player_id INTEGER NOT NULL,
+    buyer_player_id INTEGER,
+    item_key TEXT NOT NULL,
+    quantity INTEGER NOT NULL DEFAULT 1,
+    price_json TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'active',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    sold_at TEXT,
+    cancelled_at TEXT,
+    FOREIGN KEY(seller_player_id) REFERENCES players(id) ON DELETE CASCADE,
+    FOREIGN KEY(buyer_player_id) REFERENCES players(id) ON DELETE SET NULL
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_player_items_player_id
+    ON player_items(player_id);
+
+  CREATE INDEX IF NOT EXISTS idx_market_listings_status_created_at
+    ON market_listings(status, created_at DESC);
+
+  CREATE INDEX IF NOT EXISTS idx_market_listings_seller_status
+    ON market_listings(seller_player_id, status, created_at DESC);
 `);
 
 ensureColumn('players', 'contribution', 'INTEGER NOT NULL DEFAULT 0');
