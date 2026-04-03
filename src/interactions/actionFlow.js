@@ -617,6 +617,24 @@ function buildActionOptions({
     });
   }
 
+    if (bossUnlocked) {
+    options.push({
+      label: 'Bossjagd',
+      description: bossState?.isActive
+        ? `Boss aktiv bis ${formatShortTime(bossState.event.resolve_at)} Uhr`
+        : bossState?.event?.status === 'ready'
+          ? `Boss erscheint um ${formatShortTime(bossState.event.spawn_at)} Uhr`
+          : bossState?.event?.status === 'won'
+            ? 'Der Boss wurde heute bereits besiegt'
+            : bossState?.event?.status === 'lost'
+              ? 'Der Bosskampf wurde heute verloren'
+              : bossState?.event?.status === 'missed'
+                ? 'Heute wurde kein Boss angelockt'
+                : `Investiere Nahrung (${bossState?.event?.foodInvested || 0}/${bossState?.event?.foodTarget || BOSS_FOOD_TARGET})`,
+      value: 'boss',
+      emoji: '👾'
+    });
+  }
   options.push({
     label: 'Lagerstatus',
     description: 'Zeigt den Fortschritt des gesamten Camps',
