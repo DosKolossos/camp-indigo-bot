@@ -174,7 +174,7 @@ function updatePlayerProgress(discordUserId, changes = {}) {
   return getPlayerByDiscordUserId(discordUserId);
 }
 
-function getCampTotals() {
+function getCampTotals(guildKey = null) {
   const row = db.prepare(`
     SELECT
       COUNT(*) AS players,
@@ -188,7 +188,8 @@ function getCampTotals() {
       SUM(fiber) AS fiber,
       SUM(scrap) AS scrap
     FROM players
-  `).get();
+    ${guildKey ? 'WHERE guild_key = ?' : ''}
+  `).get(...(guildKey ? [guildKey] : []));
 
   return {
     players: Number(row?.players || 0),
@@ -330,15 +331,17 @@ function getTopContributorLast24Hours(guildKey = null) {
       p.discord_user_id,
       p.discord_username,
       p.guild_key,
-      SUM(pal.contribution_delta) AS contribution_sum
+      p.pokemon_key,
+      SUM(pal.contribution_delta) AS contribution_24h,
+      SUM(pal.xp_delta) AS xp_24h
     FROM player_activity_log pal
     JOIN players p
       ON p.discord_user_id = pal.discord_user_id
     WHERE pal.created_at >= ?
       AND pal.contribution_delta > 0
       ${guildKey ? 'AND p.guild_key = ?' : ''}
-    GROUP BY p.discord_user_id, p.discord_username, p.guild_key
-    ORDER BY contribution_sum DESC, p.discord_username ASC
+    GROUP BY p.discord_user_id, p.discord_username, p.guild_key, p.pokemon_key
+    ORDER BY contribution_24h DESC, xp_24h DESC, p.discord_username ASC
     LIMIT 1
   `).get(...(guildKey ? [since, guildKey] : [since]));
 
@@ -350,7 +353,10 @@ function getTopContributorLast24Hours(guildKey = null) {
     discord_user_id: row.discord_user_id,
     discord_username: row.discord_username,
     guild_key: row.guild_key,
-    contribution: Number(row.contribution_sum || 0)
+    pokemon_key: row.pokemon_key,
+    contribution: Number(row.contribution_24h || 0),
+    contribution_24h: Number(row.contribution_24h || 0),
+    xp_24h: Number(row.xp_24h || 0)
   };
 }
 
