@@ -484,8 +484,8 @@ function getActionStatus(player) {
   };
 }
 
-function getCampState() {
-  const totals = getCampTotals();
+function getCampState(guildKey = null) {
+  const totals = getCampTotals(guildKey);
   const progress = getCampProgress({
     contribution: totals.contribution,
     exploration_points: totals.exploration_points
@@ -728,7 +728,7 @@ function buildBossBackRow() {
 }
 
 function buildBossPayload(player) {
-  const camp = getCampState().progress;
+  const camp = getCampState(player.guild_key).progress;
 
   if (camp.level < BOSS_UNLOCK_CAMP_LEVEL) {
     return buildLockedPayload(
@@ -739,17 +739,32 @@ function buildBossPayload(player) {
 
   const bossState = getBossDisplayState(player);
   if (!bossState) {
-    // Fallback / "Bossjagd noch nicht verfügbar"
     return buildLockedPayload(
       '🔒 Bossjagd noch nicht verfügbar',
       'Die Bossjagd ist noch nicht verfügbar. Bitte warte auf die Freischaltung.'
     );
   }
+
+  const event = bossState.event || null;
+  const boss = bossState.boss || event?.boss || null;
+  const participation = bossState.participation || null;
+  const busy = bossState.busy || getBusyStatus(player);
+
+  if (!event || !boss) {
+    return buildLockedPayload(
+      '⚠️ Bossdaten fehlen',
+      'Für deine Gilde konnte aktuell kein Boss-Event geladen werden.'
+    );
+  }
+
   const rewardSummary = Array.isArray(event.rewardSummary?.rewards)
-    ? event.rewardSummary.rewards.slice(0, 6).map(entry => {
-      const summary = formatRewardSummary(entry.rewards || {});
-      return `• **${entry.username}**: ${summary || 'kein zusätzlicher Loot'}`;
-    }).join('\n')
+    ? event.rewardSummary.rewards
+      .slice(0, 6)
+      .map(entry => {
+        const summary = formatRewardSummary(entry.rewards || {});
+        return `• **${entry.username}**: ${summary || 'kein zusätzlicher Loot'}`;
+      })
+      .join('\n')
     : null;
 
   let description =
@@ -769,6 +784,10 @@ function buildBossPayload(player) {
     if (participation?.donated_food) {
       description += `\nDein Beitrag heute: **${participation.donated_food} Nahrung**`;
     }
+
+    if (!bossState.canDonate && bossState.donateBlockedReason) {
+      description += `\n\n🚫 ${bossState.donateBlockedReason}`;
+    }
   } else if (event.status === 'ready') {
     description +=
       `${boss.intro || 'Der Boss wurde bereits angelockt.'}\n` +
@@ -782,6 +801,8 @@ function buildBossPayload(player) {
       description += `\n\n✅ Du nimmst bereits am Bosskampf teil.`;
     } else if (busy.isBusy) {
       description += `\n\n🚫 Du bist aktuell auf **${getBusyActivityLabel(busy.activityKey)}** und kannst daher nicht teilnehmen.`;
+    } else if (!bossState.canJoin && bossState.joinBlockedReason) {
+      description += `\n\n🚫 ${bossState.joinBlockedReason}`;
     }
   } else if (event.status === 'won' || event.status === 'lost') {
     description +=
@@ -842,7 +863,7 @@ function buildBossPayload(player) {
 }
 
 async function runBossDonate(player, interaction, requestedAmount) {
-  const camp = getCampState().progress;
+  const camp = getCampState(player.guild_key).progress;
   if (camp.level < BOSS_UNLOCK_CAMP_LEVEL) {
     return buildLockedPayload(
       '🔒 Bossjagd noch nicht freigeschaltet',
@@ -882,7 +903,7 @@ async function runBossDonate(player, interaction, requestedAmount) {
 }
 
 async function runBossJoin(player) {
-  const camp = getCampState().progress;
+  const camp = getCampState(player.guild_key).progress;
   if (camp.level < BOSS_UNLOCK_CAMP_LEVEL) {
     return buildLockedPayload(
       '🔒 Bossjagd noch nicht freigeschaltet',
@@ -1354,7 +1375,7 @@ function buildActionMenu(player) {
   const guild = getGuild(player.guild_key);
   const cooldowns = getActionStatus(player);
   const busy = getBusyStatus(player);
-  const camp = getCampState().progress;
+  const camp = getCampState(player.guild_key).progress;
 
   const trainingUnlocked = camp.level >= TRAINIEREN_UNLOCK_CAMP_LEVEL;
   const erkundenUnlocked = camp.level >= ERKUNDEN_UNLOCK_CAMP_LEVEL;
