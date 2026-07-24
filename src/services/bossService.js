@@ -22,6 +22,18 @@ const BOSS_STATUS_WON = 'won';
 const BOSS_STATUS_LOST = 'lost';
 const BOSS_STATUS_MISSED = 'missed';
 
+const BOSS_UNLOCK_LEVEL = 5;
+const BOSS_MAX_SCALING_LEVEL = 10;
+
+const BOSS_TIER_WEIGHTS = {
+  5: { standard: 70, elite: 25, legendary: 5 },
+  6: { standard: 60, elite: 30, legendary: 10 },
+  7: { standard: 50, elite: 35, legendary: 15 },
+  8: { standard: 40, elite: 40, legendary: 20 },
+  9: { standard: 30, elite: 45, legendary: 25 },
+  10: { standard: 25, elite: 45, legendary: 30 }
+};
+
 const BOSS_TERMINAL_STATUSES = new Set([
   BOSS_STATUS_WON,
   BOSS_STATUS_LOST,
@@ -120,6 +132,78 @@ function parseJson(value, fallback = null) {
   }
 }
 
+function stableHash(input) {
+  return String(input)
+    .split('')
+    .reduce((sum, char, index) => {
+      return (sum + (char.charCodeAt(0) * (index + 1))) % 2147483647;
+    }, 0);
+}
+
+function getGuildBossScalingLevel(guildKey) {
+  const campLevel = Number(getGuildCampProgress(guildKey)?.level || BOSS_UNLOCK_LEVEL);
+  return clamp(BOSS_UNLOCK_LEVEL, BOSS_MAX_SCALING_LEVEL, campLevel);
+}
+
+function getTierWeightsForCampLevel(campLevel) {
+  const safeLevel = clamp(BOSS_UNLOCK_LEVEL, BOSS_MAX_SCALING_LEVEL, campLevel);
+  return BOSS_TIER_WEIGHTS[safeLevel] || BOSS_TIER_WEIGHTS[BOSS_MAX_SCALING_LEVEL];
+}
+
+function pickTierByWeights(seed, weights) {
+  const roll = stableHash(seed) % 100;
+  let cursor = 0;
+
+  for (const [tier, weight] of Object.entries(weights)) {
+    cursor += Number(weight || 0);
+    if (roll < cursor) {
+      return tier;
+    }
+  }
+
+  return 'standard';
+}
+
+function calculateScaledBossPower(bossConfig, campLevel) {
+  const basePower = Number(bossConfig?.basePower ?? bossConfig?.bossPower ?? 100);
+  const perLevel = Number(bossConfig?.powerPerCampLevel || 0);
+  const extraLevels = Math.max(0, campLevel - BOSS_UNLOCK_LEVEL);
+  return basePower + (extraLevels * perLevel);
+}
+
+function scaleRewardRange(key, range, campLevel, outcome) {
+  if (!Array.isArray(range) || range.length < 2) {
+    return null;
+  }
+
+  const min = Number(range[0]) || 0;
+  const max = Number(range[1]) || 0;
+  const extraLevels = Math.max(0, campLevel - BOSS_UNLOCK_LEVEL);
+
+  let bonus = 0;
+
+  if (key === 'xp') {
+    bonus = outcome === 'win' ? extraLevels * 2 : extraLevels;
+  } else if (outcome === 'win') {
+    bonus = Math.floor(extraLevels / 2);
+  }
+
+  return [min + bonus, max + bonus];
+}
+
+function buildScaledRewardConfig(rewardConfig = {}, campLevel, outcome) {
+  const scaled = {};
+
+  for (const [key, value] of Object.entries(rewardConfig || {})) {
+    const scaledRange = scaleRewardRange(key, value, campLevel, outcome);
+    if (scaledRange) {
+      scaled[key] = scaledRange;
+    }
+  }
+
+  return scaled;
+}
+
 function pickBossForDate(dateKey) {
   const score = String(dateKey)
     .split('')
@@ -181,12 +265,17 @@ function isBossUnlockedForGuild(guildKey) {
 }
 
 function pickBossForGuildDate(guildKey, dateKey) {
-  const seed = `${guildKey}:${dateKey}`;
-  const score = String(seed)
-    .split('')
-    .reduce((sum, char) => sum + char.charCodeAt(0), 0);
+  const campLevel = getGuildBossScalingLevel(guildKey);
+  const weights = getTierWeightsForCampLevel(campLevel);
 
-  return bosses[score % bosses.length] || bosses[0];
+  const wantedTier = pickTierByWeights(`${guildKey}:${dateKey}:tier`, weights);
+
+  const tierPool = bosses.filter(boss => boss.tier === wantedTier);
+  const fallbackPool = bosses.filter(boss => boss.tier === 'standard');
+  const pool = tierPool.length ? tierPool : (fallbackPool.length ? fallbackPool : bosses);
+
+  const index = stableHash(`${guildKey}:${dateKey}:boss:${wantedTier}`) % pool.length;
+  return pool[index] || bosses[0];
 }
 
 function getBossEventByDate(guildKey, dateKey) {
@@ -213,6 +302,8 @@ function ensureTodayBossEvent(guildKey) {
   }
 
   const boss = pickBossForGuildDate(guildKey, dateKey);
+  const campLevel = getGuildBossScalingLevel(guildKey);
+  const scaledBossPower = calculateScaledBossPower(boss, campLevel);
   const now = new Date().toISOString();
 
   db.prepare(`
@@ -236,7 +327,7 @@ function ensureTodayBossEvent(guildKey) {
     dateKey,
     boss.key,
     boss.name,
-    boss.bossPower,
+    scaledBossPower,
     BOSS_FOOD_TARGET,
     BOSS_STATUS_FUNDING,
     spawnAt,
@@ -253,9 +344,6 @@ function getTodayBossEvent(guildKey) {
   return ensureTodayBossEvent(guildKey);
 }
 
-function getTodayBossEvent() {
-  return ensureTodayBossEvent();
-}
 
 function getEventParticipants(eventId) {
   return db.prepare(`
@@ -661,10 +749,11 @@ function joinBossEvent({ discordUserId }) {
   };
 }
 
-function buildRewardPayload(rewardConfig = {}) {
+function buildRewardPayload(rewardConfig = {}, campLevel = BOSS_UNLOCK_LEVEL, outcome = 'win') {
   const payload = {};
+  const scaledConfig = buildScaledRewardConfig(rewardConfig, campLevel, outcome);
 
-  for (const [key, value] of Object.entries(rewardConfig || {})) {
+  for (const [key, value] of Object.entries(scaledConfig || {})) {
     if (!Array.isArray(value) || value.length < 2) {
       continue;
     }
@@ -712,6 +801,46 @@ function formatRewardSummary(rewards = {}) {
     .join(', ');
 }
 
+
+async function getGuildRolePing(channel, guildKey) {
+  if (!channel?.guild || !guildKey) {
+    return { mention: '', roleId: null };
+  }
+
+  const config = guilds.find(entry => entry.key === guildKey) || null;
+  const storedRole = db.prepare(`
+    SELECT guild_role_id
+    FROM players
+    WHERE guild_key = ?
+      AND guild_role_id IS NOT NULL
+      AND TRIM(guild_role_id) != ''
+    LIMIT 1
+  `).get(guildKey);
+
+  let role = null;
+  if (storedRole?.guild_role_id) {
+    role = await channel.guild.roles.fetch(storedRole.guild_role_id).catch(() => null);
+  }
+
+  if (!role) {
+    const roles = await channel.guild.roles.fetch().catch(() => null);
+    const roleName = String(config?.roleName || config?.name || guildKey).toLowerCase();
+    role = roles?.find(entry => String(entry.name || '').toLowerCase() === roleName) || null;
+  }
+
+  if (!role) {
+    return {
+      mention: config ? `@${config.roleName || config.name}` : `@${guildKey}`,
+      roleId: null
+    };
+  }
+
+  return {
+    mention: `<@&${role.id}>`,
+    roleId: role.id
+  };
+}
+
 async function sendBossMessageToGuild(client, guildKey, payload) {
   if (!client || !guildKey) return;
 
@@ -730,12 +859,36 @@ async function announceSpawnIfNeeded(client, event) {
     return event;
   }
 
-  await sendBossMessageToGuild(client, event.guild_key, {
-    content:
-      `${event.boss.emoji || '👾'} **Boss-Alarm!** ${event.bossName} ist in **${event.guild_key}** erschienen!\n` +
-      `${event.boss.intro || ''}\n` +
-      `Der Kampf läuft bis **21:00 Uhr**. Öffnet das Aktionsmenü und wählt **Bossjagd**.`
-  });
+  const channelId = getGuildChatChannelId(event.guild_key);
+  const channel = channelId
+    ? await fetchTextChannel(client, channelId).catch(() => null)
+    : null;
+  const rolePing = await getGuildRolePing(channel, event.guild_key);
+  const guildConfig = guilds.find(entry => entry.key === event.guild_key);
+
+  if (!channel) {
+    return event;
+  }
+
+  if (!rolePing.roleId) {
+    console.warn(`[boss] Gildenrolle für ${event.guild_key} nicht gefunden; Boss-Alarm wird ohne Rollen-Ping gesendet.`);
+  }
+
+  try {
+    await channel.send({
+      content:
+        `${rolePing.mention ? `${rolePing.mention} ` : ''}${event.boss.emoji || '👾'} **Boss-Alarm!** ${event.bossName} ist bei **${guildConfig?.name || event.guild_key}** erschienen!\n` +
+        `${event.boss.intro || ''}\n` +
+        `Der Kampf läuft bis **21:00 Uhr**. Öffnet das Aktionsmenü und wählt **Bossjagd**.`,
+      allowedMentions: rolePing.roleId
+        ? { roles: [rolePing.roleId], users: [], parse: [] }
+        : { parse: [] }
+    });
+  } catch (error) {
+    console.error(`[boss] Boss-Alarm für ${event.guild_key} konnte nicht gesendet werden:`, error);
+    return event;
+  }
+
 
   return updateBossEvent(event.id, { announced_spawn_at: new Date().toISOString() });
 }
@@ -751,11 +904,18 @@ async function resolveBossEvent(client, eventId) {
   const resultStatus = outcome.success ? BOSS_STATUS_WON : BOSS_STATUS_LOST;
   const rewardResults = [];
 
+  const campLevel = getGuildBossScalingLevel(event.guild_key);
+
   for (const participant of participants) {
     const rewardConfig = outcome.success
       ? event.boss.rewards?.win || {}
       : event.boss.rewards?.lose || {};
-    const rewards = buildRewardPayload(rewardConfig);
+
+    const rewards = buildRewardPayload(
+      rewardConfig,
+      campLevel,
+      outcome.success ? 'win' : 'lose'
+    );
 
     const updateResult = await applyProgressWithLevelUpAnnouncement({
       client,
@@ -814,7 +974,7 @@ async function resolveBossEvent(client, eventId) {
       .join('\n')
     : 'Niemand hat teilgenommen.';
 
-   await sendBossMessageToGuild(client, resolvedEvent.guild_key, {
+  await sendBossMessageToGuild(client, resolvedEvent.guild_key, {
     content:
       `${outcome.success ? '🏆' : '💀'} **Boss-Ergebnis:** ${resolvedEvent.bossName}\n` +
       `Teilnehmer: **${outcome.participantCount}** | Teamstärke: **${outcome.teamPower}** | Siegchance: **${Math.round(outcome.successChance * 100)}%**\n` +

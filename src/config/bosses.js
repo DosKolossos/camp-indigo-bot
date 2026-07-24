@@ -3,7 +3,10 @@ module.exports = [
     key: 'charizard',
     name: 'Glurak',
     emoji: '🔥',
+    tier: 'standard',
     bossPower: 100,
+    basePower: 100,
+    powerPerCampLevel: 6,
     intro: 'Ein wildes Glurak kreist über dem Camp und sucht die Konfrontation.',
     rewards: {
       win: {
@@ -19,47 +22,13 @@ module.exports = [
     }
   },
   {
-    key: 'mewtwo',
-    name: 'Mewtu',
-    emoji: '🧠',
-    bossPower: 120,
-    intro: 'Mewtu wurde vom Lager angelockt und testet die Stärke des Camps.',
-    rewards: {
-      win: {
-        xp: [18, 24],
-        food: [5, 9],
-        ore: [3, 4],
-        fiber: [2, 4],
-        scrap: [2, 3]
-      },
-      lose: {
-        xp: [6, 9]
-      }
-    }
-  },
-  {
-    key: 'kyogre',
-    name: 'Kyogre',
-    emoji: '🌊',
-    bossPower: 105,
-    intro: 'Kyogre taucht aus der Tiefe auf und bedroht die Vorräte des Camps.',
-    rewards: {
-      win: {
-        xp: [16, 22],
-        food: [4, 8],
-        stone: [2, 3],
-        ore: [3, 4]
-      },
-      lose: {
-        xp: [5, 8]
-      }
-    }
-  },
-  {
     key: 'tyranitar',
     name: 'Despotar',
     emoji: '🪨',
+    tier: 'standard',
     bossPower: 103,
+    basePower: 103,
+    powerPerCampLevel: 6,
     intro: 'Ein Despotar wütet in der Nähe und muss gemeinsam gestoppt werden.',
     rewards: {
       win: {
@@ -77,7 +46,10 @@ module.exports = [
     key: 'dragonite',
     name: 'Dragoran',
     emoji: '🐉',
+    tier: 'standard',
     bossPower: 106,
+    basePower: 106,
+    powerPerCampLevel: 6,
     intro: 'Ein mächtiges Dragoran wurde auf das Camp aufmerksam.',
     rewards: {
       win: {
@@ -95,7 +67,10 @@ module.exports = [
     key: 'zapdos',
     name: 'Zapdos',
     emoji: '⚡',
-    bossPower: 104,
+    tier: 'elite',
+    bossPower: 108,
+    basePower: 108,
+    powerPerCampLevel: 7,
     intro: 'Zapdos entlädt seine Energie über dem Camp.',
     rewards: {
       win: {
@@ -107,6 +82,50 @@ module.exports = [
       },
       lose: {
         xp: [6, 9]
+      }
+    }
+  },
+  {
+    key: 'kyogre',
+    name: 'Kyogre',
+    emoji: '🌊',
+    tier: 'elite',
+    bossPower: 112,
+    basePower: 112,
+    powerPerCampLevel: 8,
+    intro: 'Kyogre taucht aus der Tiefe auf und bedroht die Vorräte des Camps.',
+    rewards: {
+      win: {
+        xp: [18, 24],
+        food: [5, 9],
+        ore: [3, 4],
+        fiber: [2, 4],
+        scrap: [2, 3]
+      },
+      lose: {
+        xp: [6, 9]
+      }
+    }
+  },
+  {
+    key: 'mewtwo',
+    name: 'Mewtu',
+    emoji: '🧠',
+    tier: 'legendary',
+    bossPower: 120,
+    basePower: 120,
+    powerPerCampLevel: 10,
+    intro: 'Mewtu wurde vom Lager angelockt und testet die Stärke des Camps.',
+    rewards: {
+      win: {
+        xp: [20, 28],
+        food: [5, 9],
+        ore: [3, 5],
+        fiber: [2, 4],
+        scrap: [2, 4]
+      },
+      lose: {
+        xp: [7, 10]
       }
     }
   }

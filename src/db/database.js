@@ -53,38 +53,7 @@ function ensureGuildScopedBossTables() {
     return;
   }
 
-  console.log('[db] resetting legacy boss tables to guild-scoped schema');
-
-  db.exec(`
-    DROP TABLE IF EXISTS boss_event_players;
-    DROP TABLE IF EXISTS boss_events;
-  `);
-}
-
-function tableExists(tableName) {
-  const row = db.prepare(`
-    SELECT name
-    FROM sqlite_master
-    WHERE type = 'table' AND name = ?
-  `).get(tableName);
-
-  return Boolean(row);
-}
-
-function ensureGuildScopedBossTables() {
-  if (!tableExists('boss_events')) {
-    return;
-  }
-
-  const columns = db.prepare(`PRAGMA table_info(boss_events)`).all();
-  const hasGuildKey = columns.some(column => column.name === 'guild_key');
-
-  if (hasGuildKey) {
-    return;
-  }
-
   console.log('[db] migrating boss tables to guild-scoped schema (resetting old boss data)');
-  ensureGuildScopedBossTables();
 
   db.exec(`
     DROP TABLE IF EXISTS boss_event_players;
@@ -190,6 +159,29 @@ db.exec(`
     FOREIGN KEY(player_id) REFERENCES players(id) ON DELETE CASCADE
   );
 
+  CREATE TABLE IF NOT EXISTS pvp_challenges (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    challenger_player_id INTEGER NOT NULL,
+    opponent_player_id INTEGER NOT NULL,
+    challenger_discord_user_id TEXT NOT NULL,
+    opponent_discord_user_id TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    channel_id TEXT,
+    message_id TEXT,
+    challenger_power INTEGER NOT NULL DEFAULT 0,
+    opponent_power INTEGER NOT NULL DEFAULT 0,
+    winner_player_id INTEGER,
+    battle_log_json TEXT,
+    reward_json TEXT,
+    expires_at TEXT NOT NULL,
+    resolved_at TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY(challenger_player_id) REFERENCES players(id) ON DELETE CASCADE,
+    FOREIGN KEY(opponent_player_id) REFERENCES players(id) ON DELETE CASCADE,
+    FOREIGN KEY(winner_player_id) REFERENCES players(id) ON DELETE SET NULL
+  );
+
   CREATE TABLE IF NOT EXISTS player_items (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     player_id INTEGER NOT NULL,
@@ -216,6 +208,15 @@ db.exec(`
     FOREIGN KEY(seller_player_id) REFERENCES players(id) ON DELETE CASCADE,
     FOREIGN KEY(buyer_player_id) REFERENCES players(id) ON DELETE SET NULL
   );
+
+  CREATE INDEX IF NOT EXISTS idx_pvp_challenges_status_expires
+    ON pvp_challenges(status, expires_at);
+
+  CREATE INDEX IF NOT EXISTS idx_pvp_challenges_challenger_status
+    ON pvp_challenges(challenger_player_id, status, created_at DESC);
+
+  CREATE INDEX IF NOT EXISTS idx_pvp_challenges_opponent_status
+    ON pvp_challenges(opponent_player_id, status, created_at DESC);
 
   CREATE INDEX IF NOT EXISTS idx_player_items_player_id
     ON player_items(player_id);

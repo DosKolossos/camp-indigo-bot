@@ -37,7 +37,9 @@ const CAMP_EXPLORATION_THRESHOLDS = [
   380,
   780,
   1380,
-  2180
+  2180,
+  3180,
+  4380
 ];
 
 const CAMP_LEVEL_THRESHOLDS = [

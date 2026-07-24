@@ -367,11 +367,24 @@ function normalizeNullableDate(value) {
   return new Date(timestamp).toISOString();
 }
 
+function deletePlayerById(playerId) {
+  db.prepare(`DELETE FROM players WHERE id = ?`).run(playerId);
+}
+
+function deleteAllPlayers() {
+  db.prepare(`DELETE FROM players`).run();
+}
+
 function setPlayerStateById(playerId, nextPlayer = {}) {
   const player = getPlayerById(playerId);
   if (!player) {
     throw new Error('Spieler nicht gefunden.');
   }
+
+  const nextXp = Math.max(0, Number(nextPlayer.xp ?? player.xp) || 0);
+  const nextLevel = nextPlayer.level != null
+    ? Math.max(1, Number(nextPlayer.level) || 1)
+    : calculateLevelFromXp(nextXp);
 
   const now = new Date().toISOString();
 
@@ -409,8 +422,8 @@ function setPlayerStateById(playerId, nextPlayer = {}) {
     String(nextPlayer.pokemon_key ?? player.pokemon_key),
     String(nextPlayer.guild_key ?? player.guild_key),
     nextPlayer.guild_role_id ?? player.guild_role_id ?? null,
-    Math.max(1, Number(nextPlayer.level ?? player.level) || 1),
-    Math.max(0, Number(nextPlayer.xp ?? player.xp) || 0),
+    nextLevel,
+    nextXp,
     Math.max(0, Number(nextPlayer.wood ?? player.wood) || 0),
     Math.max(0, Number(nextPlayer.food ?? player.food) || 0),
     Math.max(0, Number(nextPlayer.stone ?? player.stone) || 0),
@@ -457,5 +470,7 @@ module.exports = {
   resetAllActionState,
   getLatestActivities,
   setPlayerStateById,
+  deletePlayerById,
+  deleteAllPlayers,
   getTopContributorLast24Hours
 };

@@ -1,19 +1,42 @@
-# Camp Indigo Bot – Panels, Cooldowns und Admin-Webinterface
+# Camp Indigo Bot
 
-Enthalten:
-- `/ping`
-- `/setup-start`
-- `/setup-actions`
-- Startnachricht mit Button **Abenteuer beginnen**
-- ephemerale Starterwahl
-- ephemerale Gildenwahl
-- Aktionspanel mit Button **Aktionen öffnen**
-- erste Aktionen: **Profil**, **Sammeln**, **Arbeiten**, **Lagerstatus**
-- Cooldowns für **Sammeln**, **Arbeiten**, **Trainieren** und **Expeditionen**
-- Spielerprofil in SQLite
-- automatische Gildenrollen-Anlage (`Nimbus`, `Ember`, `Volt`)
-- Willkommensnachricht im Chat
-- simples Admin-Webinterface zum **Bearbeiten, Löschen und Zurücksetzen** von Spielständen
+Discord-RPG mit Gilden, Camp-Fortschritt, Sammelaktionen, Expeditionen, Markt, Bossjagd und Arena-Kämpfen.
+
+## Enthaltene Systeme
+
+- `/ping`, `/setup-start` und `/setup-actions`
+- Starter- und Gildenwahl
+- automatische Gildenrollen: `Nimbus`, `Ember`, `Volt`
+- Profil mit Level, Werten, Ausrüstung, Ressourcen und PvP-Bilanz
+- Sammeln, Arbeiten, Trainieren und Erkunden
+- Schmiede, Expeditionen und Markt
+- tägliche Bossjagd pro Gilde ab Camp-Stufe 5
+- Arena/PvP ab Camp-Stufe 6
+- textbasierte Camp-Fortschrittsnachricht ohne Hintergrundbilder oder Canvas
+- Admin-Webinterface zum Bearbeiten, Löschen, Zurücksetzen und Exportieren von Spielständen
+
+## Arena / PvP
+
+- Eine Person wird direkt über die Discord-Nutzerauswahl herausgefordert.
+- Die Herausforderung wird öffentlich im aktuellen Kanal gepostet.
+- Nur die herausgeforderte Person kann annehmen oder ablehnen.
+- Kämpfe finden nur innerhalb derselben Levelklasse statt: 1–10, 11–20, 21–30 usw.
+- Beschäftigte Spieler können nicht kämpfen.
+- Nach einem Kampf gelten fünf Minuten Kampfpause.
+- Pro Person sind höchstens fünf gewertete Kämpfe innerhalb von 24 Stunden möglich.
+- Es werden keine Ressourcen gestohlen.
+- Sieger: 8 XP; Verlierer: 3 XP.
+- Die Kampfrunden berücksichtigen Level, Pokémon-Werte, Waffe und Rüstung.
+
+## Boss-Benachrichtigungen
+
+Wenn ein Boss um 20:00 Uhr erscheint, pingt der Bot die zugehörige Gildenrolle:
+
+- Nimbus-Boss → `@Nimbus`
+- Ember-Boss → `@Ember`
+- Volt-Boss → `@Volt`
+
+Der Bot benötigt dafür im Boss-/Gildenkanal die Berechtigung **„@everyone, @here und alle Rollen erwähnen“**. Seine Bot-Rolle sollte außerdem über den drei Gildenrollen stehen.
 
 ## Environment Variables
 
@@ -25,11 +48,19 @@ CHAT_CHANNEL_ID=
 START_CHANNEL_ID=
 ACTION_CHANNEL_ID=
 
+NIMBUS_CHAT_CHANNEL_ID=
+NIMBUS_PROGRESS_CHANNEL_ID=
+EMBER_CHAT_CHANNEL_ID=
+EMBER_PROGRESS_CHANNEL_ID=
+VOLT_CHAT_CHANNEL_ID=
+VOLT_PROGRESS_CHANNEL_ID=
+
 # optional
 SAMMELN_COOLDOWN_MINUTES=10
 ARBEITEN_COOLDOWN_MINUTES=8
 TRAINIEREN_COOLDOWN_MINUTES=12
 EXPEDITION_COOLDOWN_MINUTES=30
+EXPEDITION_BUSY_MINUTES=60
 
 # Admin-Webinterface
 ADMIN_WEB_ENABLED=true
@@ -37,44 +68,48 @@ ADMIN_WEB_HOST=0.0.0.0
 ADMIN_WEB_PORT=3001
 ADMIN_WEB_USER=admin
 ADMIN_WEB_PASSWORD=bitte-sehr-lang-und-zufällig
+
+# Datenbank auf dem Server, falls nicht /data/camp_indigo.db genutzt werden soll
+DB_PATH=
+DB_DIR=/data
 ```
 
-`START_CHANNEL_ID` ist optional. Wenn leer, postet `/setup-start` in den Kanal, in dem du den Befehl ausführst.
+`START_CHANNEL_ID` ist optional. Wenn es leer bleibt, postet `/setup-start` in den Kanal, in dem der Befehl ausgeführt wird.
 
-`ACTION_CHANNEL_ID` ist optional. Wenn leer, nutzt `/setup-actions` zuerst `CHAT_CHANNEL_ID` und sonst den aktuellen Kanal.
+`ACTION_CHANNEL_ID` ist optional. Wenn es leer bleibt, nutzt `/setup-actions` zuerst `CHAT_CHANNEL_ID` und sonst den aktuellen Kanal.
 
-## Lokaler Start
+## Installation und Start
 
 ```bash
 npm install
-node src/index.js
+npm start
 ```
 
-## Admin-Webinterface
+Auf dem Server mit PM2 beispielsweise:
 
-Sobald `ADMIN_WEB_USER` und `ADMIN_WEB_PASSWORD` gesetzt sind, läuft ein kleines Adminpanel unter:
-
-```txt
-http://localhost:3001/admin
+```bash
+cd /opt/camp-indigo
+npm install
+pm2 restart camp-indigo --update-env
 ```
 
-Auf Railway oder einem Server entsprechend unter deiner öffentlichen Domain plus `/admin`.
+## Fortschrittsvorschau
 
-Das Panel kann:
-- alle Spielstände anzeigen
-- einzelne Spielstände bearbeiten
-- einzelne Spielstände löschen
-- Cooldowns pro Spieler zurücksetzen
-- alle Cooldowns global zurücksetzen
-- alle Spielstände für Testphasen löschen
-- Spielstände als JSON exportieren
+Die Camp-Anzeige besteht vollständig aus Discord-Text und Embeds. Eine lokale Textvorschau kann erzeugt werden mit:
 
-## Rechte des Bots
+```bash
+npm run preview:camp
+```
 
-- Send Messages
-- Embed Links
-- Read Message History
-- Manage Roles
-- View Channels
+Die Ausgabe landet unter `tmp/camp-preview.txt`.
 
-Die Bot-Rolle muss **über** den drei Gildenrollen stehen, damit die automatische Rollenvergabe funktioniert.
+## Discord-Rechte des Bots
+
+- Kanäle ansehen
+- Nachrichten senden
+- Links einbetten
+- Nachrichtenverlauf lesen
+- Rollen verwalten
+- `@everyone`, `@here` und alle Rollen erwähnen
+
+Die Bot-Rolle muss über `Nimbus`, `Ember` und `Volt` stehen, damit Rollen angelegt, vergeben und beim Boss-Spawn erwähnt werden können.

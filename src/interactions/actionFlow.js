@@ -1,6 +1,7 @@
 const {
   ActionRowBuilder,
   StringSelectMenuBuilder,
+  UserSelectMenuBuilder,
   ButtonBuilder,
   ButtonStyle,
   EmbedBuilder,
@@ -19,7 +20,7 @@ const {
   logPlayerActivity,
   setPlayerBusy
 } = require('../services/playerService');
-const { applyProgressWithLevelUpAnnouncement } = require('../services/levelUpService');
+const { applyProgressWithLevelUpAnnouncement, postLevelUpToGuildChat } = require('../services/levelUpService');
 const { syncCampStatusMessage } = require('../services/campStatusService');
 const {
   BOSS_FOOD_TARGET,
@@ -28,6 +29,20 @@ const {
   joinBossEvent,
   formatRewardSummary
 } = require('../services/bossService');
+const {
+  PVP_UNLOCK_CAMP_LEVEL,
+  PVP_MAX_FIGHTS_24H,
+  PVP_WIN_XP,
+  PVP_LOSS_XP,
+  getLevelBracket,
+  getPvpRecord,
+  getPvpChallengeById,
+  createPvpChallenge,
+  attachPvpChallengeMessage,
+  cancelPvpChallenge,
+  declinePvpChallenge,
+  resolvePvpChallenge
+} = require('../services/pvpService');
 const {
   getXpProgress,
   getCampProgress,
@@ -101,7 +116,8 @@ const BUSY_BLOCKED_ACTIONS = new Set([
   'erkunden',
   'schmiede',
   'expedition',
-  'markt'
+  'markt',
+  'pvp'
 ]);
 
 const RESOURCE_ALIASES = {
@@ -515,6 +531,10 @@ function getNextUnlockHint(campLevel) {
     return `🔒 Nächste Freischaltung: **Bossjagd** ab Camp-Stufe ${BOSS_UNLOCK_CAMP_LEVEL}`;
   }
 
+  if (campLevel < PVP_UNLOCK_CAMP_LEVEL) {
+    return `🔒 Nächste Freischaltung: **Arena (PvP)** ab Camp-Stufe ${PVP_UNLOCK_CAMP_LEVEL}`;
+  }
+
   return '✨ Alle aktuell eingebauten Camp-Aktionen sind freigeschaltet.';
 }
 
@@ -527,7 +547,9 @@ function buildActionOptions({
   expeditionUnlocked,
   marketUnlocked,
   bossUnlocked,
-  bossState
+  bossState,
+  pvpUnlocked,
+  pvpRecord
 }) {
   const options = [
     {
@@ -635,6 +657,18 @@ function buildActionOptions({
       emoji: '👾'
     });
   }
+
+  if (pvpUnlocked) {
+    options.push({
+      label: 'Arena (PvP)',
+      description: busy.isBusy
+        ? `Gesperrt: Du bist auf ${getBusyActivityLabel(busy.activityKey)}`
+        : `${pvpRecord?.wins || 0} Siege · ${pvpRecord?.losses || 0} Niederlagen`,
+      value: 'pvp',
+      emoji: '⚔️'
+    });
+  }
+
   options.push({
     label: 'Lagerstatus',
     description: 'Zeigt den Fortschritt des gesamten Camps',
@@ -937,6 +971,138 @@ async function runBossJoin(player) {
       color: 0xe74c3c
     });
   }
+}
+
+
+function buildPvpPayload(player) {
+  const camp = getCampState(player.guild_key).progress;
+  if (camp.level < PVP_UNLOCK_CAMP_LEVEL) {
+    return buildLockedPayload(
+      '🔒 Arena noch nicht freigeschaltet',
+      `Die Arena wird ab **Camp-Stufe ${PVP_UNLOCK_CAMP_LEVEL}** verfügbar. Euer Camp ist aktuell auf Stufe **${camp.level}**.`
+    );
+  }
+
+  const busy = getBusyStatus(player);
+  if (busy.isBusy) {
+    return buildBusyPayload(player);
+  }
+
+  const record = getPvpRecord(player.id);
+  const bracket = getLevelBracket(player.level);
+  const starter = getStarter(player.pokemon_key);
+
+  const opponentMenu = new UserSelectMenuBuilder()
+    .setCustomId('camp:pvp:opponent')
+    .setPlaceholder('Gegner auswählen')
+    .setMinValues(1)
+    .setMaxValues(1);
+
+  return {
+    content: '',
+    embeds: [
+      new EmbedBuilder()
+        .setTitle('⚔️ Arena – PvP')
+        .setDescription(
+          `**Dein Kämpfer:** ${starter?.name || player.pokemon_key} ${starter?.emoji || ''} · Level ${player.level}\n` +
+          `**Levelklasse:** ${bracket.label}\n` +
+          `**Bilanz:** ${record.wins} Siege / ${record.losses} Niederlagen\n` +
+          `**Verfügbare Kämpfe:** ${record.remaining24h}/${PVP_MAX_FIGHTS_24H} in 24 Stunden\n\n` +
+          `Wähle eine Person aus. Sie muss ebenfalls Camp Indigo spielen, darf nicht beschäftigt sein und muss in derselben Levelklasse liegen.\n\n` +
+          `Es werden **keine Ressourcen gestohlen**. Der Sieger erhält **${PVP_WIN_XP} XP**, der Verlierer **${PVP_LOSS_XP} XP**.`
+        )
+        .setColor(0xe67e22)
+    ],
+    components: [
+      new ActionRowBuilder().addComponents(opponentMenu),
+      buildBackRow()
+    ]
+  };
+}
+
+function buildPublicPvpChallengePayload(result) {
+  const challengerStarter = getStarter(result.challenger.pokemon_key);
+  const opponentStarter = getStarter(result.opponent.pokemon_key);
+  const expiresUnix = Math.floor(new Date(result.challenge.expires_at).getTime() / 1000);
+
+  return {
+    content: `<@${result.opponent.discord_user_id}>, <@${result.challenger.discord_user_id}> fordert dich zu einem Arena-Kampf heraus!`,
+    allowedMentions: {
+      users: [result.opponent.discord_user_id, result.challenger.discord_user_id]
+    },
+    embeds: [
+      new EmbedBuilder()
+        .setTitle('⚔️ Arena-Herausforderung')
+        .setDescription(
+          `**${result.challenger.discord_username}** – ${challengerStarter?.name || result.challenger.pokemon_key} ${challengerStarter?.emoji || ''} · Level ${result.challenger.level}\n` +
+          `gegen\n` +
+          `**${result.opponent.discord_username}** – ${opponentStarter?.name || result.opponent.pokemon_key} ${opponentStarter?.emoji || ''} · Level ${result.opponent.level}\n\n` +
+          `**Levelklasse:** ${result.bracket.label}\n` +
+          `**Kampfkraft:** ${result.challengerProfile.power} zu ${result.opponentProfile.power}\n` +
+          `Die Herausforderung verfällt <t:${expiresUnix}:R>.`
+        )
+        .setColor(0xc0392b)
+        .setFooter({ text: 'Freiwilliger Kampf · keine Ressourcenverluste' })
+    ],
+    components: [
+      new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+          .setCustomId(`camp:pvp:accept:${result.challenge.id}`)
+          .setLabel('Kampf annehmen')
+          .setStyle(ButtonStyle.Success),
+        new ButtonBuilder()
+          .setCustomId(`camp:pvp:decline:${result.challenge.id}`)
+          .setLabel('Ablehnen')
+          .setStyle(ButtonStyle.Danger)
+      )
+    ]
+  };
+}
+
+function buildPvpResultPayload(result) {
+  const battle = result.battle;
+  const winnerStarter = getStarter(battle.winner.pokemonKey);
+  const challengerStarter = getStarter(battle.challenger.pokemonKey);
+  const opponentStarter = getStarter(battle.opponent.pokemonKey);
+  const challengerLevelUp = result.challengerUpdated.level > result.challenger.level
+    ? `\n🎉 ${result.challengerUpdated.discord_username} erreicht Level **${result.challengerUpdated.level}**.`
+    : '';
+  const opponentLevelUp = result.opponentUpdated.level > result.opponent.level
+    ? `\n🎉 ${result.opponentUpdated.discord_username} erreicht Level **${result.opponentUpdated.level}**.`
+    : '';
+  const battleLog = battle.log.slice(0, 20).join('\n');
+
+  return {
+    content: `<@${result.challenger.discord_user_id}> <@${result.opponent.discord_user_id}>`,
+    allowedMentions: { parse: [], users: [] },
+    embeds: [
+      new EmbedBuilder()
+        .setTitle(`🏆 ${battle.winner.username} gewinnt den Arena-Kampf!`)
+        .setDescription(
+          `**${challengerStarter?.name || battle.challenger.pokemonKey}** gegen **${opponentStarter?.name || battle.opponent.pokemonKey}**\n\n` +
+          `${battleLog}\n\n` +
+          `**Sieger:** ${winnerStarter?.emoji || '⚔️'} ${battle.winner.username} · +${PVP_WIN_XP} XP\n` +
+          `**Unterlegener:** ${battle.loser.username} · +${PVP_LOSS_XP} XP` +
+          `${challengerLevelUp}${opponentLevelUp}`
+        )
+        .setColor(0xf1c40f)
+        .setFooter({ text: `Kampf beendet nach ${battle.rounds} Runde(n)` })
+    ],
+    components: []
+  };
+}
+
+function buildPvpDeclinedPayload(challenge) {
+  return {
+    content: '',
+    embeds: [
+      new EmbedBuilder()
+        .setTitle('🛡️ Arena-Herausforderung abgelehnt')
+        .setDescription('Die Herausforderung wurde abgelehnt. Es gibt keine Verluste oder Abzüge.')
+        .setColor(0x95a5a6)
+    ],
+    components: []
+  };
 }
 
 function getEquipmentTierName(fieldName, tier) {
@@ -1384,6 +1550,8 @@ function buildActionMenu(player) {
   const marketUnlocked = camp.level >= MARKET_UNLOCK_CAMP_LEVEL;
   const bossUnlocked = camp.level >= BOSS_UNLOCK_CAMP_LEVEL;
   const bossState = bossUnlocked ? getBossDisplayState(player) : null;
+  const pvpUnlocked = camp.level >= PVP_UNLOCK_CAMP_LEVEL;
+  const pvpRecord = pvpUnlocked ? getPvpRecord(player.id) : null;
 
   const nextUnlockHint = getNextUnlockHint(camp.level);
 
@@ -1418,6 +1586,10 @@ function buildActionMenu(player) {
     statusLines.push(bossLine);
   }
 
+  if (pvpUnlocked && pvpRecord) {
+    statusLines.push(`⚔️ Arena: ${pvpRecord.wins} Siege | ${pvpRecord.losses} Niederlagen | ${pvpRecord.remaining24h}/${PVP_MAX_FIGHTS_24H} Kämpfe verfügbar`);
+  }
+
   const actionOptions = buildActionOptions({
     busy,
     cooldowns,
@@ -1427,7 +1599,9 @@ function buildActionMenu(player) {
     expeditionUnlocked,
     marketUnlocked,
     bossUnlocked,
-    bossState
+    bossState,
+    pvpUnlocked,
+    pvpRecord
   });
 
   const embed = new EmbedBuilder()
@@ -1469,7 +1643,8 @@ function buildProfilePayload(player) {
   const guild = getGuild(player.guild_key);
   const cooldowns = getActionStatus(player);
   const busy = getBusyStatus(player);
-  const camp = getCampState().progress;
+  const camp = getCampState(player.guild_key).progress;
+  const pvpRecord = getPvpRecord(player.id);
   const stats = calculateScaledStats(player.pokemon_key, player.level);
   const maxHp = getDisplayedMaxHp(stats);
   const xpProgress = getXpProgress(player.xp);
@@ -1490,7 +1665,8 @@ function buildProfilePayload(player) {
       `${buildStatsText(stats)}\n` +
       `**❤️ Max-KP:** ${maxHp}\n` +
       `**⚔️ Kampfkraft:** ${getPlayerCombatPower(player)}\n` +
-      `**🔎 Beutebonus:** +${getPlayerLootBonus(player)}%\n\n` +
+      `**🔎 Beutebonus:** +${getPlayerLootBonus(player)}%\n` +
+      `**🏟️ PvP-Bilanz:** ${pvpRecord.wins} Siege / ${pvpRecord.losses} Niederlagen\n\n` +
       `**Ressourcen**\n` +
       `**🪵 Holz:** ${player.wood}\n` +
       `**🍖 Nahrung:** ${player.food}\n` +
@@ -1841,8 +2017,8 @@ async function runExpedition(player, interaction) {
   });
 }
 
-function buildLagerPayload() {
-  const { totals, progress: camp } = getCampState();
+function buildLagerPayload(guildKey) {
+  const { totals, progress: camp } = getCampState(guildKey);
 
   const campProgressText = camp.isMaxLevel
     ? 'Max-Stufe erreicht'
@@ -1872,7 +2048,8 @@ function buildLagerPayload() {
           `Stufe 2: Trainieren\n` +
           `Stufe 3: Erkunden\n` +
           `Stufe 4: Schmiede, Expedition, Markt\n` +
-          `Stufe 5: Bossjagd`
+          `Stufe 5: Bossjagd\n` +
+          `Stufe 6: Arena (PvP)`
         )
         .setColor(0xf1c40f)
     ],
@@ -1899,6 +2076,9 @@ module.exports = {
         interaction.customId === 'camp:boss:refresh' ||
         interaction.customId === 'camp:boss:join' ||
         interaction.customId.startsWith('camp:boss:donate:') ||
+        interaction.customId === 'camp:pvp:opponent' ||
+        interaction.customId.startsWith('camp:pvp:accept:') ||
+        interaction.customId.startsWith('camp:pvp:decline:') ||
         interaction.customId === 'camp:market:listings' ||
         interaction.customId === 'camp:market:sellitem' ||
         interaction.customId === 'camp:market:mylistings' ||
@@ -1990,6 +2170,158 @@ module.exports = {
       }
 
       await interaction.editReply(await runBossJoin(player)).catch(() => null);
+      return true;
+    }
+
+
+    if (interaction.isUserSelectMenu() && interaction.customId === 'camp:pvp:opponent') {
+      const ok = await safeDeferUpdate(interaction);
+      if (!ok) return false;
+
+      const player = getPlayerByDiscordUserId(interaction.user.id);
+      if (!player) {
+        await interaction.editReply(getMissingPlayerPayload()).catch(() => null);
+        return true;
+      }
+
+      if (getCampState(player.guild_key).progress.level < PVP_UNLOCK_CAMP_LEVEL) {
+        await interaction.editReply(buildLockedPayload(
+          '🔒 Arena noch nicht freigeschaltet',
+          `Die Arena wird erst ab Camp-Stufe ${PVP_UNLOCK_CAMP_LEVEL} verfügbar.`
+        )).catch(() => null);
+        return true;
+      }
+
+      const opponentDiscordUserId = interaction.values[0];
+      const selectedUser = interaction.users?.get(opponentDiscordUserId);
+
+      if (selectedUser?.bot) {
+        await interaction.editReply(buildActionResultPayload({
+          title: '❌ Ungültiger Gegner',
+          description: 'Bots können nicht an Arena-Kämpfen teilnehmen.',
+          color: 0xe74c3c
+        })).catch(() => null);
+        return true;
+      }
+
+      let result = null;
+      try {
+        result = createPvpChallenge({
+          challengerDiscordUserId: player.discord_user_id,
+          opponentDiscordUserId,
+          channelId: interaction.channelId
+        });
+
+        if (!interaction.channel?.isTextBased()) {
+          throw new Error('Die Herausforderung konnte in diesem Kanal nicht veröffentlicht werden.');
+        }
+
+        const challengeMessage = await interaction.channel.send(buildPublicPvpChallengePayload(result));
+        attachPvpChallengeMessage(result.challenge.id, challengeMessage.id, challengeMessage.channelId);
+
+        await interaction.editReply({
+          content: '',
+          embeds: [
+            new EmbedBuilder()
+              .setTitle('⚔️ Herausforderung gesendet')
+              .setDescription(
+                `**${result.opponent.discord_username}** wurde herausgefordert. Die Person hat zehn Minuten Zeit, den Kampf anzunehmen.`
+              )
+              .setColor(0xe67e22)
+          ],
+          components: [buildBackRow()]
+        }).catch(() => null);
+      } catch (error) {
+        if (result?.challenge?.id) {
+          cancelPvpChallenge(result.challenge.id);
+        }
+
+        await interaction.editReply(buildActionResultPayload({
+          title: '❌ Herausforderung fehlgeschlagen',
+          description: String(error.message || error),
+          color: 0xe74c3c
+        })).catch(() => null);
+      }
+
+      return true;
+    }
+
+    if (interaction.isButton() && interaction.customId.startsWith('camp:pvp:accept:')) {
+      const challengeId = Number(interaction.customId.split(':').pop());
+      const challenge = getPvpChallengeById(challengeId);
+
+      if (!challenge || challenge.opponent_discord_user_id !== interaction.user.id) {
+        await interaction.reply({
+          content: 'Nur die herausgeforderte Person kann diesen Kampf annehmen.',
+          flags: MessageFlags.Ephemeral
+        }).catch(() => null);
+        return true;
+      }
+
+      const ok = await safeDeferReply(interaction);
+      if (!ok) return false;
+
+      try {
+        const result = resolvePvpChallenge({
+          challengeId,
+          actorDiscordUserId: interaction.user.id
+        });
+
+        await postLevelUpToGuildChat(interaction.client, result.challenger, result.challengerUpdated).catch(() => null);
+        await postLevelUpToGuildChat(interaction.client, result.opponent, result.opponentUpdated).catch(() => null);
+
+        const affectedGuilds = [...new Set([result.challenger.guild_key, result.opponent.guild_key].filter(Boolean))];
+        await Promise.all(
+          affectedGuilds.map(guildKey => syncCampStatusMessage(interaction.client, guildKey).catch(() => null))
+        );
+
+        await interaction.message.edit(buildPvpResultPayload(result));
+        await interaction.editReply({
+          content: `Der Arena-Kampf wurde ausgetragen. **${result.battle.winner.username}** hat gewonnen.`,
+          embeds: [],
+          components: []
+        }).catch(() => null);
+      } catch (error) {
+        await interaction.editReply({
+          content: `Der Kampf konnte nicht gestartet werden: ${String(error.message || error)}`,
+          embeds: [],
+          components: []
+        }).catch(() => null);
+      }
+
+      return true;
+    }
+
+    if (interaction.isButton() && interaction.customId.startsWith('camp:pvp:decline:')) {
+      const challengeId = Number(interaction.customId.split(':').pop());
+      const challenge = getPvpChallengeById(challengeId);
+
+      if (!challenge || challenge.opponent_discord_user_id !== interaction.user.id) {
+        await interaction.reply({
+          content: 'Nur die herausgeforderte Person kann diesen Kampf ablehnen.',
+          flags: MessageFlags.Ephemeral
+        }).catch(() => null);
+        return true;
+      }
+
+      const ok = await safeDeferReply(interaction);
+      if (!ok) return false;
+
+      try {
+        const declined = declinePvpChallenge({
+          challengeId,
+          actorDiscordUserId: interaction.user.id
+        });
+        await interaction.message.edit(buildPvpDeclinedPayload(declined));
+        await interaction.editReply({ content: 'Die Herausforderung wurde abgelehnt.' }).catch(() => null);
+      } catch (error) {
+        await interaction.editReply({
+          content: String(error.message || error),
+          embeds: [],
+          components: []
+        }).catch(() => null);
+      }
+
       return true;
     }
 
@@ -2348,8 +2680,13 @@ module.exports = {
         return true;
       }
 
+      if (value === 'pvp') {
+        await interaction.editReply(buildPvpPayload(player)).catch(() => null);
+        return true;
+      }
+
       if (value === 'lager') {
-        await interaction.editReply(buildLagerPayload()).catch(() => null);
+        await interaction.editReply(buildLagerPayload(player.guild_key)).catch(() => null);
         return true;
       }
 

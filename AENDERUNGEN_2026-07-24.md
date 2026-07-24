@@ -1,0 +1,44 @@
+# Camp Indigo – Arbeitsstand 24.07.2026
+
+## Fortschrittsanzeige ohne Bilder
+
+- Camp-Hintergründe, PSD-Datei, Camp-Schriften und Bildvorschau wurden entfernt.
+- Die feste Fortschrittsnachricht ist jetzt ein reines Discord-Embed.
+- Enthalten bleiben Camp-Stufe, Text-Fortschrittsbalken, Gildenbestände, Freischaltungen, Top-Beiträger und der aktivste Spieler der letzten 24 Stunden.
+- `@napi-rs/canvas` wurde aus den Abhängigkeiten entfernt.
+
+## Arena / PvP ab Camp-Stufe 6
+
+- Gegnerwahl über Discord-Nutzerauswahl.
+- Öffentliche Herausforderung mit Annahme- und Ablehnen-Button.
+- Matchmaking nur innerhalb derselben Zehner-Levelklasse.
+- Keine Kämpfe während Busy-Aktionen.
+- Fünf Minuten Kampfpause nach jedem Kampf.
+- Höchstens fünf gewertete Kämpfe je Person innerhalb von 24 Stunden.
+- Keine Ressourcenverluste oder erzwungenen Kämpfe.
+- 8 XP für den Sieger, 3 XP für den Verlierer.
+- Automatischer rundenbasierter Kampf mit Kraft, Ausdauer, Tempo, Instinkt, Geschick, Waffe und Rüstung.
+- PvP-Bilanz wird im Profil und Aktionsmenü angezeigt.
+- Neue Datenbanktabelle `pvp_challenges` mit Löschkaskaden zu Spielern.
+- Kampfabschluss, XP-Vergabe und Kampfprotokoll werden gemeinsam in einer Datenbanktransaktion gespeichert.
+
+## Boss-Ping
+
+- Beim tatsächlichen Boss-Spawn wird die passende Gildenrolle erwähnt: `@Nimbus`, `@Ember` oder `@Volt`.
+- Die Rolle wird zunächst über die gespeicherte Rollen-ID und ersatzweise über den Rollennamen aufgelöst.
+- Es wird nur die betroffene Gilde gepingt, nicht jedes Mal alle drei Rollen.
+- Ein fehlgeschlagener Discord-Versand wird nicht als erledigt markiert; der Scheduler versucht die Meldung erneut.
+
+## Weitere Reparatur
+
+- User-Select-Menüs und Modal-Submits werden nun im zentralen Interaction-Router verarbeitet.
+- Der Lagerstatus und die Profil-Camp-Stufe verwenden jetzt korrekt die jeweilige Gilde statt globaler Summen.
+- Die zuvor geprüften Reparaturen an Bossmigration, Adminpanel, Spielerlöschung und Camp-Stufen 9–10 bleiben enthalten.
+
+## Prüfungen
+
+- Alle JavaScript-Dateien bestehen `node --check`.
+- PvP-Simulation mit 1.000 Testkämpfen bestanden.
+- SQLite-Schema inklusive `pvp_challenges` erfolgreich in einer In-Memory-Datenbank angelegt.
+- Textbasierter Camp-Payload ohne Dateien oder Attachments erfolgreich geprüft.
+- Ein vollständiger Laufzeittest mit echten npm-Paketen war in der Arbeitsumgebung nicht möglich, weil der interne npm-Paketserver wiederholt HTTP 503 geliefert hat.

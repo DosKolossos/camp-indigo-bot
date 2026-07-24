@@ -5,12 +5,11 @@ const {
   allPlayers,
   getPlayerById,
   getCampTotals,
-  updatePlayerAdmin,
+  setPlayerStateById,
   deletePlayerById,
   deleteAllPlayers,
   resetPlayerCooldowns,
-  resetAllCooldowns,
-  resetCampToStage3
+  resetAllCooldowns
 } = require('../services/playerService');
 
 function startAdminServer() {
@@ -76,7 +75,7 @@ function startAdminServer() {
 
 
 
-    updatePlayerAdmin(id, {
+    setPlayerStateById(id, {
       discord_username: req.body.discord_username,
       pokemon_key: req.body.pokemon_key,
       guild_key: req.body.guild_key,
@@ -94,10 +93,6 @@ function startAdminServer() {
     return res.redirect('/admin/player/' + id + '?notice=success&message=' + encodeURIComponent('Spielstand gespeichert.'));
   });
 
-  app.post('/admin/camp/reset-stage-3', (_req, res) => {
-    resetCampToStage3();
-    return res.redirect('/admin?notice=success&message=' + encodeURIComponent('Camp wurde auf Stufe 3 zurückgesetzt.'));
-  });
 
   app.post('/admin/player/:id/delete', (req, res) => {
     const id = Number(req.params.id);
@@ -398,9 +393,6 @@ function renderDashboard(players, totals, notice, message) {
           <form class="inline" method="post" action="/admin/players/delete-all" onsubmit="return confirm('Wirklich ALLE Spielstände löschen?');">
             <button class="btn btn-danger" type="submit">Alle Spielstände löschen</button>
           </form>
-          <form class="inline" method="post" action="/admin/camp/reset-stage-3" onsubmit="return confirm('Camp wirklich auf Stufe 3 zurücksetzen?');">
-  <button class="btn btn-warning" type="submit">Camp auf Stufe 3 zurücksetzen</button>
-</form>
         </div>
       </div>
       <table>
