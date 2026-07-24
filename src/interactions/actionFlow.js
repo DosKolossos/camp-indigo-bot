@@ -1,7 +1,6 @@
 const {
   ActionRowBuilder,
   StringSelectMenuBuilder,
-  UserSelectMenuBuilder,
   ButtonBuilder,
   ButtonStyle,
   EmbedBuilder,
@@ -35,6 +34,7 @@ const {
   PVP_WIN_XP,
   PVP_LOSS_XP,
   getLevelBracket,
+  getEligiblePvpOpponents,
   getPvpRecord,
   getPvpChallengeById,
   createPvpChallenge,
@@ -43,6 +43,7 @@ const {
   declinePvpChallenge,
   resolvePvpChallenge
 } = require('../services/pvpService');
+const { getPvpChannelId, fetchPvpChannel } = require('../services/channelService');
 const {
   getXpProgress,
   getCampProgress,
@@ -991,12 +992,65 @@ function buildPvpPayload(player) {
   const record = getPvpRecord(player.id);
   const bracket = getLevelBracket(player.level);
   const starter = getStarter(player.pokemon_key);
+  const pvpChannelId = getPvpChannelId();
 
-  const opponentMenu = new UserSelectMenuBuilder()
+  let matchmaking;
+  try {
+    matchmaking = getEligiblePvpOpponents(player.discord_user_id);
+  } catch (error) {
+    return buildActionResultPayload({
+      title: '⚔️ Arena derzeit nicht verfügbar',
+      description: String(error.message || error),
+      color: 0xe67e22
+    });
+  }
+
+  const totalEligibleOpponents = matchmaking.opponents.length;
+  const eligibleOpponents = matchmaking.opponents.slice(0, 25);
+
+  if (eligibleOpponents.length === 0) {
+    return {
+      content: '',
+      embeds: [
+        new EmbedBuilder()
+          .setTitle('⚔️ Arena – keine Gegner verfügbar')
+          .setDescription(
+            `**Dein Kämpfer:** ${starter?.name || player.pokemon_key} ${starter?.emoji || ''} · Level ${player.level}\n` +
+            `**Levelklasse:** ${bracket.label}\n` +
+            `**Bilanz:** ${record.wins} Siege / ${record.losses} Niederlagen\n` +
+            `**Verfügbare Kämpfe:** ${record.remaining24h}/${PVP_MAX_FIGHTS_24H} in 24 Stunden\n\n` +
+            `Aktuell ist niemand spielbereit, der zu deiner Levelklasse passt. Angezeigt werden nur Personen mit freigeschalteter Arena, ohne Busy-Status, Kampfpause, Tageslimit oder offene Herausforderung.\n\n` +
+            `Herausforderungen und Ergebnisse erscheinen in <#${pvpChannelId}>.`
+          )
+          .setColor(0x95a5a6)
+      ],
+      components: [buildBackRow()]
+    };
+  }
+
+  const opponentMenu = new StringSelectMenuBuilder()
     .setCustomId('camp:pvp:opponent')
-    .setPlaceholder('Gegner auswählen')
+    .setPlaceholder(
+      totalEligibleOpponents > eligibleOpponents.length
+        ? `${eligibleOpponents.length} von ${totalEligibleOpponents} passenden Gegnern`
+        : `${eligibleOpponents.length} spielbare Gegner verfügbar`
+    )
     .setMinValues(1)
-    .setMaxValues(1);
+    .setMaxValues(1)
+    .addOptions(
+      eligibleOpponents.map(({ player: opponent, profile }) => {
+        const opponentStarter = getStarter(opponent.pokemon_key);
+        const opponentGuild = getGuild(opponent.guild_key);
+        return {
+          label: truncateText(opponent.discord_username, 100),
+          description: truncateText(
+            `${opponentStarter?.name || opponent.pokemon_key} · Level ${opponent.level} · Kraft ${profile.power} · ${opponentGuild?.name || opponent.guild_key}`,
+            100
+          ),
+          value: opponent.discord_user_id
+        };
+      })
+    );
 
   return {
     content: '',
@@ -1008,7 +1062,9 @@ function buildPvpPayload(player) {
           `**Levelklasse:** ${bracket.label}\n` +
           `**Bilanz:** ${record.wins} Siege / ${record.losses} Niederlagen\n` +
           `**Verfügbare Kämpfe:** ${record.remaining24h}/${PVP_MAX_FIGHTS_24H} in 24 Stunden\n\n` +
-          `Wähle eine Person aus. Sie muss ebenfalls Camp Indigo spielen, darf nicht beschäftigt sein und muss in derselben Levelklasse liegen.\n\n` +
+          `Wähle einen der aktuell spielbaren Gegner aus. Nicht verfügbare Personen werden gar nicht erst angezeigt.\n` +
+          `${totalEligibleOpponents > eligibleOpponents.length ? `Bei mehr als 25 Treffern werden die passendsten Gegner zuerst angezeigt.\n` : ''}` +
+          `Die Herausforderung und das Kampfergebnis erscheinen in <#${pvpChannelId}>.\n\n` +
           `Es werden **keine Ressourcen gestohlen**. Der Sieger erhält **${PVP_WIN_XP} XP**, der Verlierer **${PVP_LOSS_XP} XP**.`
         )
         .setColor(0xe67e22)
@@ -2174,7 +2230,10 @@ module.exports = {
     }
 
 
-    if (interaction.isUserSelectMenu() && interaction.customId === 'camp:pvp:opponent') {
+    if (
+      (interaction.isStringSelectMenu() || interaction.isUserSelectMenu()) &&
+      interaction.customId === 'camp:pvp:opponent'
+    ) {
       const ok = await safeDeferUpdate(interaction);
       if (!ok) return false;
 
@@ -2206,17 +2265,18 @@ module.exports = {
 
       let result = null;
       try {
+        const arenaChannel = await fetchPvpChannel(interaction.client);
+        if (!arenaChannel) {
+          throw new Error(`Der Arena-Kanal <#${getPvpChannelId()}> wurde nicht gefunden oder der Bot darf dort nicht schreiben.`);
+        }
+
         result = createPvpChallenge({
           challengerDiscordUserId: player.discord_user_id,
           opponentDiscordUserId,
-          channelId: interaction.channelId
+          channelId: arenaChannel.id
         });
 
-        if (!interaction.channel?.isTextBased()) {
-          throw new Error('Die Herausforderung konnte in diesem Kanal nicht veröffentlicht werden.');
-        }
-
-        const challengeMessage = await interaction.channel.send(buildPublicPvpChallengePayload(result));
+        const challengeMessage = await arenaChannel.send(buildPublicPvpChallengePayload(result));
         attachPvpChallengeMessage(result.challenge.id, challengeMessage.id, challengeMessage.channelId);
 
         await interaction.editReply({
@@ -2225,7 +2285,7 @@ module.exports = {
             new EmbedBuilder()
               .setTitle('⚔️ Herausforderung gesendet')
               .setDescription(
-                `**${result.opponent.discord_username}** wurde herausgefordert. Die Person hat zehn Minuten Zeit, den Kampf anzunehmen.`
+                `**${result.opponent.discord_username}** wurde in <#${arenaChannel.id}> herausgefordert. Die Person hat zehn Minuten Zeit, den Kampf anzunehmen.`
               )
               .setColor(0xe67e22)
           ],

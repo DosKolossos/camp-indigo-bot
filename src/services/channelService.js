@@ -14,6 +14,10 @@ function getGuildProgressChannelId(guildKey) {
   return guild?.progressChannelId || process.env.CAMP_STATUS_CHANNEL_ID || null;
 }
 
+function getPvpChannelId() {
+  return process.env.PVP_CHANNEL_ID || '1485798330406801549';
+}
+
 async function fetchTextChannel(client, channelId) {
   if (!client || !channelId) {
     return null;
@@ -35,11 +39,17 @@ async function fetchGuildProgressChannel(client, guildKey) {
   return fetchTextChannel(client, getGuildProgressChannelId(guildKey));
 }
 
+async function fetchPvpChannel(client) {
+  return fetchTextChannel(client, getPvpChannelId());
+}
+
 module.exports = {
   getGuildConfig,
   getGuildChatChannelId,
   getGuildProgressChannelId,
+  getPvpChannelId,
   fetchTextChannel,
   fetchGuildChatChannel,
-  fetchGuildProgressChannel
+  fetchGuildProgressChannel,
+  fetchPvpChannel
 };

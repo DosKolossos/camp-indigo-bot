@@ -17,8 +17,9 @@ Discord-RPG mit Gilden, Camp-Fortschritt, Sammelaktionen, Expeditionen, Markt, B
 
 ## Arena / PvP
 
-- Eine Person wird direkt über die Discord-Nutzerauswahl herausgefordert.
-- Die Herausforderung wird öffentlich im aktuellen Kanal gepostet.
+- Die Gegnerauswahl enthält ausschließlich aktuell spielbare Camp-Indigo-Spieler.
+- Nicht angezeigt werden unter anderem Spieler aus einer anderen Levelklasse, beschäftigte Spieler, Personen in Kampfpause, Spieler am Tageslimit oder Personen mit einer offenen Herausforderung.
+- Die Herausforderung und das Kampfergebnis werden im festen Arena-Kanal gepostet.
 - Nur die herausgeforderte Person kann annehmen oder ablehnen.
 - Kämpfe finden nur innerhalb derselben Levelklasse statt: 1–10, 11–20, 21–30 usw.
 - Beschäftigte Spieler können nicht kämpfen.
@@ -47,6 +48,7 @@ DISCORD_GUILD_ID=
 CHAT_CHANNEL_ID=
 START_CHANNEL_ID=
 ACTION_CHANNEL_ID=
+PVP_CHANNEL_ID=1485798330406801549
 
 NIMBUS_CHAT_CHANNEL_ID=
 NIMBUS_PROGRESS_CHANNEL_ID=
@@ -77,6 +79,8 @@ DB_DIR=/data
 `START_CHANNEL_ID` ist optional. Wenn es leer bleibt, postet `/setup-start` in den Kanal, in dem der Befehl ausgeführt wird.
 
 `ACTION_CHANNEL_ID` ist optional. Wenn es leer bleibt, nutzt `/setup-actions` zuerst `CHAT_CHANNEL_ID` und sonst den aktuellen Kanal.
+
+`PVP_CHANNEL_ID` bestimmt den gemeinsamen Arena-Kanal. Ohne Eintrag verwendet der Bot standardmäßig `1485798330406801549`.
 
 ## Installation und Start
 

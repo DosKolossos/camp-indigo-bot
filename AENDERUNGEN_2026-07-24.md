@@ -42,3 +42,13 @@
 - SQLite-Schema inklusive `pvp_challenges` erfolgreich in einer In-Memory-Datenbank angelegt.
 - Textbasierter Camp-Payload ohne Dateien oder Attachments erfolgreich geprüft.
 - Ein vollständiger Laufzeittest mit echten npm-Paketen war in der Arbeitsumgebung nicht möglich, weil der interne npm-Paketserver wiederholt HTTP 503 geliefert hat.
+
+## Arena-Kanal und gefilterte Gegnerwahl
+
+- PvP-Herausforderungen und Kampfergebnisse werden ausschließlich im Arena-Kanal `1485798330406801549` veröffentlicht.
+- Der Kanal kann bei Bedarf über `PVP_CHANNEL_ID` geändert werden.
+- Die allgemeine Discord-Nutzerauswahl wurde durch eine Camp-Indigo-Gegnerliste ersetzt.
+- Angezeigt werden nur Spieler in derselben Levelklasse, deren Gilde Camp-Stufe 6 erreicht hat und die weder beschäftigt noch in Kampfpause oder am Tageslimit sind.
+- Spieler mit einer bereits offenen Herausforderung werden ebenfalls ausgeblendet.
+- Die Auswahl zeigt Pokémon, Level, Kampfkraft und Gilde des Gegners.
+- Die Verfügbarkeit wird beim Absenden erneut geprüft, damit zwischenzeitliche Statusänderungen keinen ungültigen Kampf erzeugen.

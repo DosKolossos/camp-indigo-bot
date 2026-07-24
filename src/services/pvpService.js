@@ -1,8 +1,10 @@
 const db = require('../db/database');
-const { calculateScaledStats } = require('./progressionService');
+const { calculateScaledStats, getCampProgress } = require('./progressionService');
 const {
   getPlayerByDiscordUserId,
   getPlayerById,
+  allPlayers,
+  getCampTotals,
   updatePlayerProgress,
   logPlayerActivity
 } = require('./playerService');
@@ -236,10 +238,44 @@ function getFightCountLast24Hours(playerId) {
   return Number(row?.amount || 0);
 }
 
-function assertPlayerCanFight(player) {
-  if (!player) throw new Error('Spieler nicht gefunden.');
+function getOpenPvpChallengeForPlayer(playerId) {
+  return db.prepare(`
+    SELECT id
+    FROM pvp_challenges
+    WHERE status IN (?, ?)
+      AND (challenger_player_id = ? OR opponent_player_id = ?)
+    LIMIT 1
+  `).get(PVP_STATUS_PENDING, PVP_STATUS_RESOLVING, playerId, playerId);
+}
+
+function getPlayerCampLevel(player, campLevelCache = new Map()) {
+  if (!player?.guild_key) return 1;
+  if (campLevelCache.has(player.guild_key)) {
+    return campLevelCache.get(player.guild_key);
+  }
+
+  const totals = getCampTotals(player.guild_key);
+  const level = getCampProgress({
+    contribution: totals.contribution,
+    exploration_points: totals.exploration_points
+  }).level;
+
+  campLevelCache.set(player.guild_key, level);
+  return level;
+}
+
+function assertArenaUnlockedForPlayer(player, campLevelCache = new Map()) {
+  const campLevel = getPlayerCampLevel(player, campLevelCache);
+  if (campLevel < PVP_UNLOCK_CAMP_LEVEL) {
+    throw new Error(`${player.discord_username}s Gilde hat die Arena noch nicht freigeschaltet.`);
+  }
+  return campLevel;
+}
+
+function getPlayerFightBlockReason(player, { includeOpenChallenge = false } = {}) {
+  if (!player) return 'Spieler nicht gefunden.';
   if (isPlayerBusy(player)) {
-    throw new Error(`${player.discord_username} ist gerade auf einer anderen Aktion unterwegs.`);
+    return `${player.discord_username} ist gerade auf einer anderen Aktion unterwegs.`;
   }
 
   const recentFight = getRecentResolvedFight(player.id);
@@ -247,13 +283,65 @@ function assertPlayerCanFight(player) {
     const remaining = (new Date(recentFight.resolved_at).getTime() + PVP_FIGHT_COOLDOWN_MS) - Date.now();
     if (remaining > 0) {
       const minutes = Math.ceil(remaining / 60000);
-      throw new Error(`${player.discord_username} braucht noch etwa ${minutes} Minute(n) Kampfpause.`);
+      return `${player.discord_username} braucht noch etwa ${minutes} Minute(n) Kampfpause.`;
     }
   }
 
   if (getFightCountLast24Hours(player.id) >= PVP_MAX_FIGHTS_24H) {
-    throw new Error(`${player.discord_username} hat das Limit von ${PVP_MAX_FIGHTS_24H} Arena-Kämpfen in 24 Stunden erreicht.`);
+    return `${player.discord_username} hat das Limit von ${PVP_MAX_FIGHTS_24H} Arena-Kämpfen in 24 Stunden erreicht.`;
   }
+
+  if (includeOpenChallenge && getOpenPvpChallengeForPlayer(player.id)) {
+    return `${player.discord_username} hat bereits eine offene PvP-Herausforderung.`;
+  }
+
+  return null;
+}
+
+function assertPlayerCanFight(player, options = {}) {
+  const reason = getPlayerFightBlockReason(player, options);
+  if (reason) throw new Error(reason);
+}
+
+function getEligiblePvpOpponents(challengerDiscordUserId) {
+  expireOldPvpChallenges();
+
+  const challenger = getPlayerByDiscordUserId(challengerDiscordUserId);
+  if (!challenger) throw new Error('Du hast noch keinen Camp-Indigo-Spielstand.');
+
+  const campLevelCache = new Map();
+  assertArenaUnlockedForPlayer(challenger, campLevelCache);
+  assertPlayerCanFight(challenger, { includeOpenChallenge: true });
+
+  const bracket = getLevelBracket(challenger.level);
+  const challengerProfile = getCombatProfile(challenger);
+  const opponents = allPlayers()
+    .filter(candidate => Number(candidate.id) !== Number(challenger.id))
+    .filter(candidate => getLevelBracket(candidate.level).key === bracket.key)
+    .filter(candidate => getPlayerCampLevel(candidate, campLevelCache) >= PVP_UNLOCK_CAMP_LEVEL)
+    .filter(candidate => !getPlayerFightBlockReason(candidate, { includeOpenChallenge: true }))
+    .map(candidate => ({
+      player: candidate,
+      profile: getCombatProfile(candidate)
+    }))
+    .sort((left, right) => {
+      const levelDistance = Math.abs(Number(left.player.level) - Number(challenger.level))
+        - Math.abs(Number(right.player.level) - Number(challenger.level));
+      if (levelDistance !== 0) return levelDistance;
+
+      const powerDistance = Math.abs(left.profile.power - challengerProfile.power)
+        - Math.abs(right.profile.power - challengerProfile.power);
+      if (powerDistance !== 0) return powerDistance;
+
+      return String(left.player.discord_username).localeCompare(String(right.player.discord_username), 'de');
+    });
+
+  return {
+    challenger,
+    challengerProfile,
+    bracket,
+    opponents
+  };
 }
 
 function createPvpChallenge({ challengerDiscordUserId, opponentDiscordUserId, channelId = null }) {
@@ -265,6 +353,10 @@ function createPvpChallenge({ challengerDiscordUserId, opponentDiscordUserId, ch
   if (!challenger) throw new Error('Du hast noch keinen Camp-Indigo-Spielstand.');
   if (!opponent) throw new Error('Die ausgewählte Person hat noch keinen Camp-Indigo-Spielstand.');
   if (challenger.id === opponent.id) throw new Error('Du kannst dich nicht selbst herausfordern.');
+
+  const campLevelCache = new Map();
+  assertArenaUnlockedForPlayer(challenger, campLevelCache);
+  assertArenaUnlockedForPlayer(opponent, campLevelCache);
 
   const challengerBracket = getLevelBracket(challenger.level);
   const opponentBracket = getLevelBracket(opponent.level);
@@ -410,6 +502,9 @@ function resolvePvpChallenge({ challengeId, actorDiscordUserId }) {
     const challenger = getPlayerById(challenge.challenger_player_id);
     const opponent = getPlayerById(challenge.opponent_player_id);
 
+    const campLevelCache = new Map();
+    assertArenaUnlockedForPlayer(challenger, campLevelCache);
+    assertArenaUnlockedForPlayer(opponent, campLevelCache);
     assertPlayerCanFight(challenger);
     assertPlayerCanFight(opponent);
 
@@ -535,6 +630,7 @@ module.exports = {
   PVP_STATUS_EXPIRED,
   getLevelBracket,
   getCombatProfile,
+  getEligiblePvpOpponents,
   simulatePvpBattle,
   getPvpChallengeById,
   createPvpChallenge,
