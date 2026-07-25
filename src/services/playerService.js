@@ -29,6 +29,9 @@ ensurePlayerColumn('scrap', 'INTEGER NOT NULL DEFAULT 0');
 ensurePlayerColumn('weapon_tier', 'INTEGER NOT NULL DEFAULT 0');
 ensurePlayerColumn('armor_tier', 'INTEGER NOT NULL DEFAULT 0');
 ensurePlayerColumn('scanner_tier', 'INTEGER NOT NULL DEFAULT 0');
+ensurePlayerColumn('is_active', 'INTEGER NOT NULL DEFAULT 1');
+ensurePlayerColumn('left_server_at', 'TEXT');
+ensurePlayerColumn('last_member_check_at', 'TEXT');
 
 function getPlayerByDiscordUserId(discordUserId) {
   return db.prepare(`
@@ -64,17 +67,51 @@ function createPlayer({ discordUserId, discordUsername, pokemonKey, guildKey, gu
   return getPlayerById(result.lastInsertRowid);
 }
 
-function allPlayers(guildKey = null) {
-  if (!guildKey) {
-    return db.prepare(`SELECT * FROM players ORDER BY created_at ASC`).all();
+function allPlayers(guildKey = null, options = {}) {
+  const includeInactive = Boolean(options?.includeInactive);
+  const conditions = [];
+  const values = [];
+
+  if (guildKey) {
+    conditions.push('guild_key = ?');
+    values.push(guildKey);
   }
+
+  if (!includeInactive) {
+    conditions.push('is_active = 1');
+  }
+
+  const whereClause = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
 
   return db.prepare(`
     SELECT *
     FROM players
-    WHERE guild_key = ?
+    ${whereClause}
     ORDER BY created_at ASC
-  `).all(guildKey);
+  `).all(...values);
+}
+
+function setPlayerMembershipStatus(discordUserId, { isActive, discordUsername = null } = {}) {
+  const player = getPlayerByDiscordUserId(discordUserId);
+  if (!player) return null;
+
+  const now = new Date().toISOString();
+  const activeValue = isActive ? 1 : 0;
+  const nextUsername = discordUsername ? String(discordUsername) : player.discord_username;
+
+  db.prepare(`
+    UPDATE players
+    SET is_active = ?,
+        discord_username = ?,
+        left_server_at = CASE
+          WHEN ? = 1 THEN NULL
+          ELSE COALESCE(left_server_at, ?)
+        END,
+        last_member_check_at = ?
+    WHERE discord_user_id = ?
+  `).run(activeValue, nextUsername, activeValue, now, now, discordUserId);
+
+  return getPlayerByDiscordUserId(discordUserId);
 }
 
 function updatePlayerProgress(discordUserId, changes = {}) {
@@ -177,16 +214,16 @@ function updatePlayerProgress(discordUserId, changes = {}) {
 function getCampTotals(guildKey = null) {
   const row = db.prepare(`
     SELECT
-      COUNT(*) AS players,
-      SUM(xp) AS xp,
-      SUM(wood) AS wood,
-      SUM(food) AS food,
-      SUM(stone) AS stone,
+      SUM(CASE WHEN is_active = 1 THEN 1 ELSE 0 END) AS players,
+      SUM(CASE WHEN is_active = 1 THEN xp ELSE 0 END) AS xp,
+      SUM(CASE WHEN is_active = 1 THEN wood ELSE 0 END) AS wood,
+      SUM(CASE WHEN is_active = 1 THEN food ELSE 0 END) AS food,
+      SUM(CASE WHEN is_active = 1 THEN stone ELSE 0 END) AS stone,
       SUM(contribution) AS contribution,
       SUM(exploration_points) AS exploration_points,
-      SUM(ore) AS ore,
-      SUM(fiber) AS fiber,
-      SUM(scrap) AS scrap
+      SUM(CASE WHEN is_active = 1 THEN ore ELSE 0 END) AS ore,
+      SUM(CASE WHEN is_active = 1 THEN fiber ELSE 0 END) AS fiber,
+      SUM(CASE WHEN is_active = 1 THEN scrap ELSE 0 END) AS scrap
     FROM players
     ${guildKey ? 'WHERE guild_key = ?' : ''}
   `).get(...(guildKey ? [guildKey] : []));
@@ -339,6 +376,7 @@ function getTopContributorLast24Hours(guildKey = null) {
       ON p.discord_user_id = pal.discord_user_id
     WHERE pal.created_at >= ?
       AND pal.contribution_delta > 0
+      AND p.is_active = 1
       ${guildKey ? 'AND p.guild_key = ?' : ''}
     GROUP BY p.discord_user_id, p.discord_username, p.guild_key, p.pokemon_key
     ORDER BY contribution_24h DESC, xp_24h DESC, p.discord_username ASC
@@ -455,6 +493,7 @@ module.exports = {
   getPlayerById,
   createPlayer,
   allPlayers,
+  setPlayerMembershipStatus,
   updatePlayerProgress,
   getCampTotals,
   getActionCooldownField,

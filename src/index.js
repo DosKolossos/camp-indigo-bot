@@ -17,6 +17,12 @@ const actionFlow = require('./interactions/actionFlow');
 const { startAdminServer } = require('./web/adminServer');
 const { sendBotLog } = require('./services/botLogService');
 const { processBossSchedulerTick } = require('./services/bossService');
+const { syncCampStatusMessage } = require('./services/campStatusService');
+const {
+  syncAllDiscordMembers,
+  updatePlayerFromMember,
+  touchPlayerFromInteraction
+} = require('./services/memberSyncService');
 
 function envFlag(name, fallback = false) {
   const value = String(process.env[name] ?? fallback).toLowerCase().trim();
@@ -25,6 +31,7 @@ function envFlag(name, fallback = false) {
 
 const ENABLE_ADMIN_WEB = envFlag('ADMIN_WEB_ENABLED', true);
 const ENABLE_DISCORD_BOT = envFlag('ENABLE_DISCORD_BOT', true);
+const MEMBER_SYNC_INTERVAL_MS = 3 * 24 * 60 * 60 * 1000;
 
 if (ENABLE_ADMIN_WEB) {
   startAdminServer();
@@ -80,10 +87,26 @@ if (!ENABLE_DISCORD_BOT) {
   }
 
   let bossTickTimer = null;
+  let memberSyncTimer = null;
+
+  async function refreshChangedCampStatuses(guildKeys = []) {
+    for (const guildKey of guildKeys) {
+      if (!guildKey) continue;
+      await syncCampStatusMessage(client, guildKey);
+    }
+  }
 
   client.once('clientReady', async () => {
     console.log(`Eingeloggt als ${client.user.tag}`);
     await registerCommands();
+
+    try {
+      const memberSync = await syncAllDiscordMembers(client);
+      console.log(`[members] ${memberSync.checked} Spielstände geprüft: ${memberSync.active} aktiv, ${memberSync.inactive} inaktiv, ${memberSync.changed} geändert.`);
+      await refreshChangedCampStatuses(memberSync.changedGuildKeys);
+    } catch (error) {
+      console.error('Spieler-Synchronisierung beim Start fehlgeschlagen:', error);
+    }
 
     await sendBotLog(
       client,
@@ -106,10 +129,51 @@ if (!ENABLE_DISCORD_BOT) {
     }
 
     bossTickTimer = setInterval(runBossTick, 30 * 1000);
+
+    if (memberSyncTimer) {
+      clearInterval(memberSyncTimer);
+    }
+
+    memberSyncTimer = setInterval(async () => {
+      try {
+        const memberSync = await syncAllDiscordMembers(client);
+        if (memberSync.changed > 0) {
+          console.log(`[members] ${memberSync.changed} Mitgliedsstatus geändert.`);
+          await refreshChangedCampStatuses(memberSync.changedGuildKeys);
+        }
+      } catch (error) {
+        console.error('Regelmäßige Spieler-Synchronisierung fehlgeschlagen:', error);
+      }
+    }, MEMBER_SYNC_INTERVAL_MS);
+  });
+
+  client.on('guildMemberRemove', async member => {
+    if (member.guild.id !== process.env.DISCORD_GUILD_ID) return;
+
+    const result = updatePlayerFromMember(member, false);
+    if (!result?.player) return;
+
+    console.log(`[members] ${result.player.discord_username} wurde deaktiviert (Server verlassen).`);
+    await refreshChangedCampStatuses([result.guildKey]);
+  });
+
+  client.on('guildMemberAdd', async member => {
+    if (member.guild.id !== process.env.DISCORD_GUILD_ID) return;
+
+    const result = updatePlayerFromMember(member, true);
+    if (!result?.player) return;
+
+    console.log(`[members] ${result.player.discord_username} wurde reaktiviert (Server beigetreten).`);
+    await refreshChangedCampStatuses([result.guildKey]);
   });
 
   client.on('interactionCreate', async interaction => {
     try {
+      const memberTouch = touchPlayerFromInteraction(interaction);
+      if (memberTouch?.changed) {
+        await refreshChangedCampStatuses([memberTouch.guildKey]);
+      }
+
       if (interaction.isChatInputCommand()) {
         const command = client.commands.get(interaction.commandName);
         if (!command) return;

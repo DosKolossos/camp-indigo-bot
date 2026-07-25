@@ -117,3 +117,16 @@ Die Ausgabe landet unter `tmp/camp-preview.txt`.
 - `@everyone`, `@here` und alle Rollen erwähnen
 
 Die Bot-Rolle muss über `Nimbus`, `Ember` und `Volt` stehen, damit Rollen angelegt, vergeben und beim Boss-Spawn erwähnt werden können.
+
+## Automatischer Abgleich mit Discord-Mitgliedern
+
+Camp Indigo gleicht gespeicherte Spieler mit dem Discord-Server ab:
+
+- sofort bei `guildMemberRemove` und `guildMemberAdd`
+- einmal beim Botstart
+- zusätzlich alle drei Tage als Sicherheitsabgleich
+- bei jeder Interaktion wird der ausführende Spieler als anwesend bestätigt
+
+Verlassene Spieler werden nur deaktiviert. Sie erscheinen nicht mehr in Ranglisten, PvP-Gegnerlisten oder der aktiven Spielerzahl. Ihr Spielstand bleibt erhalten und wird bei einem erneuten Beitritt automatisch reaktiviert. Ein endgültiges Löschen ist weiterhin im Admin-Webinterface möglich.
+
+Damit die Ereignisse und der vollständige Abgleich funktionieren, muss im Discord Developer Portal der privilegierte Intent **Server Members Intent** aktiviert sein.

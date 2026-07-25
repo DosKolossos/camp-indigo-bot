@@ -52,3 +52,15 @@
 - Spieler mit einer bereits offenen Herausforderung werden ebenfalls ausgeblendet.
 - Die Auswahl zeigt Pokémon, Level, Kampfkraft und Gilde des Gegners.
 - Die Verfügbarkeit wird beim Absenden erneut geprüft, damit zwischenzeitliche Statusänderungen keinen ungültigen Kampf erzeugen.
+
+
+## Automatische Server-Mitgliedschaft
+
+- Spielstände werden beim Botstart mit den Mitgliedern des Discord-Servers abgeglichen.
+- Beim Verlassen des Servers wird der Spielstand automatisch deaktiviert.
+- Beim erneuten Beitritt wird derselbe Spielstand automatisch reaktiviert.
+- Zusätzlich erfolgt alle drei Tage ein vollständiger Sicherheitsabgleich.
+- Jede Interaktion reaktiviert den ausführenden Spieler, falls ein Discord-Ereignis verpasst wurde.
+- Inaktive Spieler erscheinen nicht in Ranglisten, PvP-Gegnerlisten oder der aktiven Spielerzahl.
+- Ihre bisherigen Beiträge und Erkundungspunkte bleiben für den erreichten Camp-Fortschritt erhalten.
+- Im Adminbereich werden aktive und inaktive Spielstände sichtbar getrennt; endgültiges Löschen bleibt möglich.

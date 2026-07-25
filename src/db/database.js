@@ -255,6 +255,9 @@ ensureColumn('players', 'scrap', 'INTEGER NOT NULL DEFAULT 0');
 ensureColumn('players', 'weapon_tier', 'INTEGER NOT NULL DEFAULT 0');
 ensureColumn('players', 'armor_tier', 'INTEGER NOT NULL DEFAULT 0');
 ensureColumn('players', 'scanner_tier', 'INTEGER NOT NULL DEFAULT 0');
+ensureColumn('players', 'is_active', 'INTEGER NOT NULL DEFAULT 1');
+ensureColumn('players', 'left_server_at', 'TEXT');
+ensureColumn('players', 'last_member_check_at', 'TEXT');
 ensureColumn('player_activity_log', 'exploration_points_delta', 'INTEGER NOT NULL DEFAULT 0');
 
 module.exports = db;

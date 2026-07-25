@@ -274,6 +274,9 @@ function assertArenaUnlockedForPlayer(player, campLevelCache = new Map()) {
 
 function getPlayerFightBlockReason(player, { includeOpenChallenge = false } = {}) {
   if (!player) return 'Spieler nicht gefunden.';
+  if (Number(player.is_active) !== 1) {
+    return `${player.discord_username} ist nicht mehr auf dem Discord-Server.`;
+  }
   if (isPlayerBusy(player)) {
     return `${player.discord_username} ist gerade auf einer anderen Aktion unterwegs.`;
   }

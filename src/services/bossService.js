@@ -812,6 +812,7 @@ async function getGuildRolePing(channel, guildKey) {
     SELECT guild_role_id
     FROM players
     WHERE guild_key = ?
+      AND is_active = 1
       AND guild_role_id IS NOT NULL
       AND TRIM(guild_role_id) != ''
     LIMIT 1

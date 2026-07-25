@@ -40,7 +40,7 @@ function startAdminServer() {
   });
 
   app.get('/admin', (req, res) => {
-    const players = allPlayers();
+    const players = allPlayers(null, { includeInactive: true });
     const totals = getCampTotals();
     const notice = req.query.notice ? String(req.query.notice) : '';
     const message = req.query.message ? String(req.query.message) : '';
@@ -125,7 +125,7 @@ function startAdminServer() {
   app.get('/admin/export.json', (_req, res) => {
     res.json({
       exportedAt: new Date().toISOString(),
-      players: allPlayers(),
+      players: allPlayers(null, { includeInactive: true }),
       totals: getCampTotals()
     });
   });
@@ -335,6 +335,8 @@ function renderLayout({ title, body, autoRefreshMs = 0 }) {
     .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; }
     .toolbar { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
     .pill { display: inline-block; padding: 4px 8px; border-radius: 999px; background: rgba(96,165,250,.12); color: var(--blue); font-size: 12px; font-weight: 700; }
+    .pill-active { background: rgba(16,185,129,.12); color: #6ee7b7; }
+    .pill-inactive { background: rgba(239,68,68,.12); color: #fca5a5; }
     .danger-zone { border: 1px solid rgba(239,68,68,.35); background: rgba(239,68,68,.08); }
   </style>
 </head>
@@ -355,7 +357,7 @@ function renderDashboard(players, totals, notice, message) {
 
   const rows = players.length
     ? players.map(player => renderPlayerRow(player)).join('')
-    : '<tr><td colspan="9" class="muted">Noch keine Spielstände vorhanden.</td></tr>';
+    : '<tr><td colspan="10" class="muted">Noch keine Spielstände vorhanden.</td></tr>';
 
   return `
 <div class="topbar">
@@ -373,7 +375,7 @@ function renderDashboard(players, totals, notice, message) {
     ${noticeHtml}
     <div class="panel">
       <div class="grid grid-4">
-        <div class="stat"><div class="label">Spieler</div><div class="value">${totals.players}</div></div>
+        <div class="stat"><div class="label">Aktive Spieler</div><div class="value">${totals.players}</div></div>
         <div class="stat"><div class="label">Gesamt-XP</div><div class="value">${totals.xp}</div></div>
         <div class="stat"><div class="label">Gesamt-Ressourcen</div><div class="value">${totals.wood + totals.food + totals.stone}</div></div>
         <div class="stat"><div class="label">Lagerbeitrag</div><div class="value">${totals.contribution}</div></div>
@@ -384,7 +386,7 @@ function renderDashboard(players, totals, notice, message) {
       <div class="toolbar">
         <div>
           <div class="title" style="font-size:20px;">Spielstände</div>
-          <div class="subtitle">Bearbeiten, löschen oder Cooldowns pro Spieler zurücksetzen.</div>
+          <div class="subtitle">Inaktive Spielstände bleiben erhalten, zählen aber nicht für Ranglisten, PvP oder Ressourcen.</div>
         </div>
         <div class="actions">
           <form class="inline" method="post" action="/admin/players/reset-cooldowns" onsubmit="return confirm('Wirklich alle Cooldowns zurücksetzen?');">
@@ -399,6 +401,7 @@ function renderDashboard(players, totals, notice, message) {
         <thead>
           <tr>
             <th>Spieler</th>
+            <th>Status</th>
             <th>Pokémon</th>
             <th>Gilde</th>
             <th>Level / XP</th>
@@ -416,6 +419,9 @@ function renderDashboard(players, totals, notice, message) {
 }
 
 function renderPlayerRow(player) {
+  const isActive = Number(player.is_active) === 1;
+  const statusText = isActive ? 'Auf Server' : 'Nicht auf Server';
+  const statusClass = isActive ? 'pill-active' : 'pill-inactive';
   const sammeln = renderCooldownTag(player.sammeln_cooldown_until, 'Sammeln');
   const arbeiten = renderCooldownTag(player.arbeiten_cooldown_until, 'Arbeiten');
   const expedition = renderCooldownTag(player.expedition_cooldown_until, 'Expedition');
@@ -426,6 +432,7 @@ function renderPlayerRow(player) {
         <strong>${escapeHtml(player.discord_username)}</strong><br />
         <span class="muted">${escapeHtml(player.discord_user_id)}</span>
       </td>
+      <td><span class="pill ${statusClass}">${statusText}</span></td>
       <td>${escapeHtml(getStarterLabel(player))}</td>
       <td>${escapeHtml(getGuildLabel(player))}</td>
       <td><strong>Lv ${player.level}</strong><br /><span class="muted">${escapeHtml(getProgressLabel(player))}</span></td>
